@@ -1,0 +1,22 @@
+export const IpcChannels = Object.freeze({
+  INITIALIZE_APP: 'app:initialize',
+  RAW_MATERIAL_LIST: 'raw-material:list',
+  RAW_MATERIAL_CREATE: 'raw-material:create',
+  RAW_MATERIAL_UPDATE: 'raw-material:update',
+  RAW_MATERIAL_DETAIL: 'raw-material:detail',
+  RAW_MATERIAL_DELETE: 'raw-material:delete',
+  PRODUCT_LIST: 'product:list',
+  PRODUCT_CREATE: 'product:create',
+  PRODUCT_UPDATE: 'product:update',
+  PRODUCT_DETAIL: 'product:detail',
+  PRODUCT_DELETE: 'product:delete',
+  PRODUCT_DRAFT_CALCULATE: 'product-draft:calculate',
+  RAW_MATERIAL_DRAFT_CALCULATE: 'raw-material-draft:calculate',
+  SETTINGS_LOAD: 'settings:load',
+  SETTINGS_UPDATE: 'settings:update',
+  ADMIN_VERIFY: 'admin:verify',
+  USER_LIST: 'user:list',
+  USER_CREATE: 'user:create',
+  USER_UPDATE: 'user:update',
+  USER_AUTHENTICATE: 'user:authenticate'
+});

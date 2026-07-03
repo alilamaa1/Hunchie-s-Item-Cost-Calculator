@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Weeks Grid</title>
+  <style>
+    :root {
+      --cell-size: 28px;
+      --gap: 4px;
+      --label-size: 34px;
+      --border: #2f343b;
+      --label: #1f2933;
+      --page: #f7f9fc;
+      --cell: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--label);
+      background: var(--page);
+    }
+
+    .page {
+      min-height: 100vh;
+      padding: 24px;
+      overflow: auto;
+    }
+
+    .grid-wrap {
+      display: grid;
+      grid-template-columns: var(--label-size) repeat(52, var(--cell-size));
+      grid-template-rows: var(--label-size) repeat(75, var(--cell-size));
+      gap: var(--gap);
+      width: max-content;
+      align-items: stretch;
+    }
+
+    .corner {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .column-label,
+    .row-label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--label);
+    }
+
+    .column-label {
+      grid-row: 1;
+    }
+
+    .row-label {
+      grid-column: 1;
+    }
+
+    .cell {
+      width: var(--cell-size);
+      height: var(--cell-size);
+      background: var(--cell);
+      border: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="grid-wrap" id="weeks-grid" aria-label="Weeks grid with 52 columns and 75 rows"></div>
+  </main>
+
+  <script>
+    const rows = 75;
+    const columns = 52;
+    const grid = document.getElementById('weeks-grid');
+
+    const corner = document.createElement('div');
+    corner.className = 'corner';
+    grid.appendChild(corner);
+
+    for (let column = 1; column <= columns; column += 1) {
+      const label = document.createElement('div');
+      label.className = 'column-label';
+      label.textContent = column;
+      label.style.gridColumn = column + 1;
+      grid.appendChild(label);
+    }
+
+    for (let row = 1; row <= rows; row += 1) {
+      const rowLabel = document.createElement('div');
+      rowLabel.className = 'row-label';
+      rowLabel.textContent = row;
+      rowLabel.style.gridRow = row + 1;
+      grid.appendChild(rowLabel);
+
+      for (let column = 1; column <= columns; column += 1) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.style.gridColumn = column + 1;
+        cell.style.gridRow = row + 1;
+        grid.appendChild(cell);
+      }
+    }
+  </script>
+</body>
+</html>

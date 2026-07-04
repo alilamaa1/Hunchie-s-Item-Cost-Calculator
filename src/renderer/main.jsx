@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Cake,
+  Calculator,
   Check,
   ChevronRight,
   Eye,
@@ -866,7 +867,7 @@ function Sidebar({ activeView, canView, canEdit, onNavigate, onNewProduct, mobil
       {mobileOpen && <button className="scrim" onClick={onClose} aria-label="Close navigation" />}
       <aside className={`sidebar ${mobileOpen ? 'is-open' : ''}`}>
         <div className="brand-row">
-          <div className="brand-mark">I</div>
+          <div className="brand-mark"><Calculator size={23} /></div>
           <div>
             <h1>Item Cost</h1>
             <p>Calculator</p>

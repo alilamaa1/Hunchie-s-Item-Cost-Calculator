@@ -3,6 +3,7 @@ import { blobFileSystem, blobJsonStorage } from '../src/backend/storage/blobJson
 
 const services = createAppServices();
 const DATA_FOLDER = 'vercel-data';
+const adminMethods = new Set(['listUsers', 'createUser', 'updateUser']);
 
 const handlers = Object.freeze({
   initializeApp: () => services.initializeApp(context()),
@@ -37,6 +38,10 @@ export default async function handler(request, response) {
     const method = String(payload?.method ?? '');
     const fn = handlers[method];
     if (!fn) return send(response, 404, { ok: false, error: { message: 'Unknown API method.' } });
+    if (adminMethods.has(method)) {
+      const admin = await services.verifyAdminKey(payload?.adminKey);
+      if (!admin.ok) return send(response, 403, admin);
+    }
 
     const result = await fn(...(Array.isArray(payload.args) ? payload.args : []));
     return send(response, 200, result);

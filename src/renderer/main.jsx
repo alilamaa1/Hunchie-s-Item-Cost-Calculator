@@ -1040,7 +1040,7 @@ function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, se
       <PageTitle
         title={mode === 'edit' ? 'Edit Raw Material' : 'Add Raw Material'}
         subtitle="Enter the bought quantity and price. The app shows useful cost references for purchasing and display."
-        action={mode === 'edit' ? <button type="submit" className="primary-button" disabled={saving}><Save size={18} />{saving ? 'Saving...' : 'Save Raw Material'}</button> : undefined}
+        action={<button type="submit" className="primary-button" disabled={saving}><Save size={18} />{saving ? 'Saving...' : 'Save Raw Material'}</button>}
       />
       <div className="raw-material-layout">
         <InfoPanel title="Ingredient">
@@ -1234,7 +1234,7 @@ function ProductForm({ mode, id, products, materials, setActiveView, afterMutati
       <PageTitle
         title={mode === 'edit' ? 'Edit Product' : 'Product Builder'}
         subtitle="Choose raw materials and quantities. Costs update live from backend calculations."
-        action={mode === 'edit' ? <button type="submit" className="primary-button" disabled={saving}><Save size={18} />{saving ? 'Saving...' : 'Save Product'}</button> : undefined}
+        action={<button type="submit" className="primary-button" disabled={saving}><Save size={18} />{saving ? 'Saving...' : 'Save Product'}</button>}
       />
       <div className="builder-layout">
         <div className="builder-main">

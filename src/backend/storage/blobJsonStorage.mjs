@@ -1,4 +1,4 @@
-import { get, head, put } from '@vercel/blob';
+import { get, head, list, put } from '@vercel/blob';
 import { basename } from 'node:path';
 import { ErrorCodes } from '../../shared/errors.mjs';
 import { failureFromCode, success } from '../../shared/result.mjs';
@@ -11,27 +11,24 @@ export const blobFileSystem = Object.freeze({
   access: async (filePath) => {
     if (isBackupsFolder(filePath)) return;
     try {
-      await head(toBlobPath(filePath));
+      if (await latestVersionPath(filePath)) return;
+      await head(toDirectBlobPath(filePath));
     } catch (error) {
       throw notFoundError(error);
     }
   },
   mkdir: async () => {},
   writeFile: async (filePath, content, options = {}) => {
-    const pathname = toBlobPath(filePath);
     if (options?.flag === 'wx') {
-      try {
-        await head(pathname);
+      if (await latestVersionPath(filePath)) {
         const error = new Error('Blob already exists.');
         error.code = 'EEXIST';
         throw error;
-      } catch (error) {
-        if (error?.code === 'EEXIST') throw error;
       }
     }
-    await put(pathname, String(content), {
+    await put(toVersionBlobPath(filePath), String(content), {
       access: 'private',
-      allowOverwrite: options?.flag !== 'wx',
+      allowOverwrite: false,
       contentType: 'application/json'
     });
   }
@@ -45,7 +42,8 @@ export const blobJsonStorage = Object.freeze({
 
 export async function readJsonFile(filePath) {
   try {
-    const blob = await get(toBlobPath(filePath), { access: 'private' });
+    const pathname = await latestVersionPath(filePath) ?? toDirectBlobPath(filePath);
+    const blob = await get(pathname, { access: 'private' });
     if (!blob) return failureFromCode(ErrorCodes.FILE_MISSING, { path: filePath });
     const content = await new Response(blob.stream).text();
     return success(JSON.parse(content));
@@ -61,12 +59,14 @@ export async function readJsonFile(filePath) {
 
 export async function writeJsonFile(filePath, data) {
   try {
-    await put(toBlobPath(filePath), `${JSON.stringify(data, null, 2)}\n`, {
+    const content = `${JSON.stringify(data, null, 2)}\n`;
+    const pathname = toVersionBlobPath(filePath);
+    await put(pathname, content, {
       access: 'private',
-      allowOverwrite: true,
+      allowOverwrite: false,
       contentType: 'application/json'
     });
-    return success({ path: filePath });
+    return success({ path: filePath, blobPath: pathname });
   } catch (error) {
     return failureFromCode(ErrorCodes.FILE_SAVE_ERROR, {
       path: filePath,
@@ -77,13 +77,13 @@ export async function writeJsonFile(filePath, data) {
 
 export async function backupJsonFile(filePath, backupsFolder, options = {}) {
   try {
-    const source = await get(toBlobPath(filePath), { access: 'private' });
-    if (!source) return failureFromCode(ErrorCodes.FILE_MISSING, { path: filePath });
-    const content = await new Response(source.stream).text();
-    const backupPath = `${toBlobPath(backupsFolder)}/${createBackupFileName(filePath, options.now ?? new Date())}`;
+    const current = await readJsonFile(filePath);
+    if (!current.ok) return current;
+    const content = `${JSON.stringify(current.data, null, 2)}\n`;
+    const backupPath = `${toDirectBlobPath(backupsFolder)}/${createBackupFileName(filePath, options.now ?? new Date())}`;
     await put(backupPath, content, {
       access: 'private',
-      allowOverwrite: true,
+      allowOverwrite: false,
       contentType: 'application/json'
     });
     return success({ backupPath });
@@ -96,7 +96,31 @@ export async function backupJsonFile(filePath, backupsFolder, options = {}) {
   }
 }
 
-function toBlobPath(filePath) {
+async function latestVersionPath(filePath) {
+  const fileName = basename(String(filePath).replace(/\\/g, '/'));
+  if (!JSON_FILES.has(fileName)) return null;
+
+  const result = await list({
+    prefix: `${DATA_PREFIX}/versions/${fileName}/`,
+    limit: 1000
+  });
+  const latest = result.blobs
+    .filter((blob) => blob.pathname.endsWith('.json'))
+    .sort((first, second) => {
+      const dateDiff = new Date(second.uploadedAt).getTime() - new Date(first.uploadedAt).getTime();
+      return dateDiff || second.pathname.localeCompare(first.pathname);
+    })[0];
+
+  return latest?.pathname ?? null;
+}
+
+function toVersionBlobPath(filePath) {
+  const fileName = basename(String(filePath).replace(/\\/g, '/'));
+  const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${DATA_PREFIX}/versions/${fileName}/${unique}.json`;
+}
+
+function toDirectBlobPath(filePath) {
   const normalized = String(filePath).replace(/\\/g, '/');
   if (isBackupsFolder(normalized)) return `${DATA_PREFIX}/backups`;
   if (normalized.includes('/backups/')) return `${DATA_PREFIX}/backups/${basename(normalized)}`;

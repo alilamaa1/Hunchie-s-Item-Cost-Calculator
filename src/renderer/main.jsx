@@ -183,6 +183,8 @@ function MainApp() {
     }
   }, [currentUser?.id]);
 
+  usePullToRefresh(Boolean(currentUser), refreshAll);
+
   useEffect(() => {
     function syncCurrentUser() {
       if (!currentUser) return;
@@ -450,6 +452,15 @@ function AdminApp() {
     return true;
   }
 
+  function logoutAdmin() {
+    api.setAdminKey?.('');
+    setAuthorized(false);
+    setPin('');
+    setUsers([]);
+    setError('');
+    setNotice('');
+  }
+
   function saveDepartmentOption(value) {
     const nextOptions = mergeDepartmentOptions(departmentOptions, [value]);
     setDepartmentOptions(nextOptions);
@@ -458,6 +469,8 @@ function AdminApp() {
   }
 
   const filteredUsers = filterUsers(users, userSearch);
+
+  usePullToRefresh(authorized, loadUsers);
 
   if (!authorized) {
     return (
@@ -488,7 +501,10 @@ function AdminApp() {
           <h1>User Access</h1>
           <p>Create users and decide who can still access the Item Cost Calculator.</p>
         </div>
-        <a className="secondary-button" href="/">Back to program</a>
+        <div className="button-row">
+          <button className="secondary-button" type="button" onClick={logoutAdmin}><LogOut size={16} />Log Out</button>
+          <a className="secondary-button" href="/">Back to program</a>
+        </div>
       </section>
       {error && <Notice type="error" message={error} onClose={() => setError('')} />}
       {notice && <Notice type="success" message={notice} onClose={() => setNotice('')} />}
@@ -1093,8 +1109,10 @@ function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, se
   );
 }
 
-function ProductsView({ products, searchQuery, setActiveView, canEdit }) {
-  const filtered = filterByName(products, searchQuery);
+function ProductsView({ products, materials, searchQuery, setActiveView, canEdit }) {
+  const [searchScope, setSearchScope] = useState('all');
+  const [sortMode, setSortMode] = useState('default');
+  const filtered = sortProducts(filterProducts(products, materials, searchQuery, searchScope), sortMode);
   const canEditProducts = canEdit('products');
 
   return (
@@ -1104,6 +1122,7 @@ function ProductsView({ products, searchQuery, setActiveView, canEdit }) {
         subtitle="Products are calculated from the latest raw material costs."
         action={canEditProducts ? <button className="primary-button" onClick={() => setActiveView({ name: 'product-new' })}><Plus size={18} />Create Product</button> : <span className="readonly-pill">Read only</span>}
       />
+      <ProductListControls searchScope={searchScope} setSearchScope={setSearchScope} sortMode={sortMode} setSortMode={setSortMode} />
       {filtered.length === 0 ? (
         <EmptyState title="No products yet" text="Create a product and add raw materials to calculate total production cost." actionLabel={canEditProducts ? 'Create Product' : undefined} onAction={canEditProducts ? () => setActiveView({ name: 'product-new' }) : undefined} />
       ) : (
@@ -1125,6 +1144,32 @@ function ProductsView({ products, searchQuery, setActiveView, canEdit }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ProductListControls({ searchScope, setSearchScope, sortMode, setSortMode }) {
+  return (
+    <div className="product-controls">
+      <div className="segmented-control" aria-label="Product search filter">
+        {[
+          ['all', 'All'],
+          ['products', 'Products']
+        ].map(([value, label]) => (
+          <button type="button" key={value} className={searchScope === value ? 'active' : ''} onClick={() => setSearchScope(value)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <label className="compact-select">
+        <span>Sort</span>
+        <select value={sortMode} onChange={(event) => setSortMode(event.target.value)}>
+          <option value="default">Default</option>
+          <option value="alphabetical">Alphabetical</option>
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+        </select>
+      </label>
     </div>
   );
 }
@@ -1294,7 +1339,7 @@ function IngredientRow({ ingredient, materials, selectedMaterialIds, materialSea
 
   return (
     <div className="ingredient-row">
-      <SelectField label="Raw Material" value={ingredient.rawMaterialId} onChange={(value) => onChange({ ...ingredient, rawMaterialId: value, unit: defaultUnit(materials.find((item) => item.id === value)) })} options={[['', materialSearchQuery.trim() ? 'Select matching material' : 'Select material'], ...visibleMaterialOptions.map((item) => [item.id, item.name])]} />
+      <UpwardSelectField label="Raw Material" value={ingredient.rawMaterialId} onChange={(value) => onChange({ ...ingredient, rawMaterialId: value, unit: defaultUnit(materials.find((item) => item.id === value)) })} options={[['', materialSearchQuery.trim() ? 'Select matching material' : 'Select material'], ...visibleMaterialOptions.map((item) => [item.id, item.name])]} />
       <TextField label="Quantity" type="number" value={ingredient.quantity} onChange={(value) => onChange({ ...ingredient, quantity: value })} />
       <SelectField label="Unit" value={ingredient.unit} onChange={(value) => onChange({ ...ingredient, unit: value })} options={units} />
       <div className="portion-cost">
@@ -1428,6 +1473,46 @@ function SelectField({ label, value, onChange, options }) {
       <select value={value ?? ''} onChange={(event) => onChange(event.target.value)}>
         {options.map(([optionValue, labelText]) => <option key={optionValue} value={optionValue}>{labelText}</option>)}
       </select>
+    </label>
+  );
+}
+
+function UpwardSelectField({ label, value, onChange, options }) {
+  const [open, setOpen] = useState(false);
+  const selectedLabel = options.find(([optionValue]) => optionValue === (value ?? ''))?.[1] ?? options[0]?.[1] ?? 'Select';
+
+  function choose(nextValue) {
+    onChange(nextValue);
+    setOpen(false);
+  }
+
+  return (
+    <label className="field upward-select-field">
+      <span>{label}</span>
+      <button
+        type="button"
+        className="custom-select-button"
+        onClick={() => setOpen((current) => !current)}
+        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+      >
+        <span>{selectedLabel}</span>
+        <ChevronRight size={16} />
+      </button>
+      {open && (
+        <div className="upward-select-menu" role="listbox">
+          {options.map(([optionValue, labelText]) => (
+            <button
+              type="button"
+              key={optionValue}
+              className={optionValue === (value ?? '') ? 'active' : ''}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => choose(optionValue)}
+            >
+              {labelText}
+            </button>
+          ))}
+        </div>
+      )}
     </label>
   );
 }
@@ -1625,6 +1710,35 @@ function filterByName(items, query) {
   return items.filter((item) => item.name.toLowerCase().includes(needle));
 }
 
+function filterProducts(products, materials, query, scope) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return products;
+  return products.filter((product) => {
+    const productNameMatches = product.name.toLowerCase().includes(needle);
+    if (scope === 'products') return productNameMatches;
+    return productNameMatches || product.ingredients?.some((ingredient) => {
+      const material = materials.find((item) => item.id === ingredient.rawMaterialId);
+      return [
+        ingredient.rawMaterialName,
+        ingredient.rawMaterialId,
+        material?.name
+      ].some((value) => String(value ?? '').toLowerCase().includes(needle));
+    });
+  });
+}
+
+function sortProducts(products, mode) {
+  if (mode === 'alphabetical') return [...products].sort((first, second) => first.name.localeCompare(second.name) || first.id.localeCompare(second.id));
+  if (mode === 'newest') return [...products].sort((first, second) => dateValue(second.createdAt) - dateValue(first.createdAt));
+  if (mode === 'oldest') return [...products].sort((first, second) => dateValue(first.createdAt) - dateValue(second.createdAt));
+  return products;
+}
+
+function dateValue(value) {
+  const time = new Date(value ?? 0).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
 function filterProductIngredients(ingredients, query) {
   const needle = query.trim().toLowerCase();
   if (!needle) return ingredients;
@@ -1786,6 +1900,40 @@ function writeDepartmentOptions(options) {
 function withoutUserPassword(user) {
   const { password, ...sessionUser } = user ?? {};
   return sessionUser;
+}
+
+function usePullToRefresh(enabled, onRefresh) {
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined') return undefined;
+
+    let startY = null;
+    let refreshing = false;
+
+    function onTouchStart(event) {
+      if (window.scrollY > 0 || event.touches.length !== 1) {
+        startY = null;
+        return;
+      }
+      startY = event.touches[0].clientY;
+    }
+
+    function onTouchEnd(event) {
+      if (startY == null || refreshing) return;
+      const endY = event.changedTouches[0]?.clientY ?? startY;
+      if (endY - startY < 90 || window.scrollY > 0) return;
+      refreshing = true;
+      Promise.resolve(onRefresh()).finally(() => {
+        refreshing = false;
+      });
+    }
+
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchend', onTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [enabled, onRefresh]);
 }
 
 function sanitizeUsernameInput(value) {

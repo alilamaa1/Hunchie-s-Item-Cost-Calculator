@@ -726,6 +726,82 @@ button {
   display: grid;
 }
 
+.upward-select-field {
+  position: relative;
+}
+
+.custom-select-button {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: var(--ink);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  font-weight: 750;
+}
+
+.custom-select-button > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.custom-select-button svg {
+  flex: 0 0 auto;
+  transform: rotate(-90deg);
+}
+
+.custom-select-button:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(52, 49, 45, 0.1);
+  outline: none;
+}
+
+.upward-select-menu {
+  position: absolute;
+  z-index: 55;
+  right: 0;
+  bottom: calc(100% + 4px);
+  left: 0;
+  max-height: 220px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  overflow-y: auto;
+  display: grid;
+  gap: 4px;
+}
+
+.upward-select-menu button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  font-weight: 750;
+}
+
+.upward-select-menu button.active,
+.upward-select-menu button:hover {
+  background: var(--surface-soft);
+}
+
 .conversion-box {
   display: grid;
   grid-template-columns: minmax(96px, 1.1fr) minmax(90px, 1fr) 86px;
@@ -845,6 +921,62 @@ button {
 .ingredient-list {
   display: grid;
   gap: 10px;
+}
+
+.product-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.segmented-control {
+  width: fit-content;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  display: inline-flex;
+  gap: 4px;
+}
+
+.segmented-control button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 12px;
+  color: var(--muted);
+  background: transparent;
+  font-weight: 850;
+}
+
+.segmented-control button.active,
+.segmented-control button:hover {
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.compact-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--subtle);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.compact-select select {
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: none;
 }
 
 .ingredient-row {
@@ -1309,6 +1441,15 @@ button {
 
   .ingredient-row {
     grid-template-columns: 1fr;
+  }
+
+  .product-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .compact-select {
+    justify-content: space-between;
   }
 
   .cta-band,

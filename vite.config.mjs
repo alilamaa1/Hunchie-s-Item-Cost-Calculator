@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [react()],
   root: '.',
-  base: './',
+  base: process.env.VERCEL ? '/' : './',
   build: {
     outDir: 'dist',
     emptyOutDir: true
@@ -14,4 +14,3 @@ export default defineConfig({
     port: 5173
   }
 });
-

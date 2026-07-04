@@ -30,6 +30,7 @@ import { createBrowserDemoApi } from './browserDemoApi.js';
 import hunchiesLogo from './assets/hunchies-logo.png';
 
 const api = window.itemCostApi ?? createBrowserDemoApi();
+const CANONICAL_WEB_HOST = 'item-cost-calculator.vercel.app';
 const USER_SESSION_KEY = 'item_cost_current_user';
 const USER_ACCESS_SYNC_KEY = 'item_cost_users_updated_at';
 const USER_ACCESS_CHANNEL = 'item-cost-user-access';
@@ -119,6 +120,8 @@ const emptyProductForm = {
   name: '',
   ingredients: [{ rawMaterialId: '', quantity: '', unit: '' }]
 };
+
+redirectToCanonicalWebHost();
 
 function App() {
   return isAdminRoute() ? <AdminApp /> : <MainApp />;
@@ -1743,6 +1746,14 @@ function roundForInput(value) {
 
 function isAdminRoute() {
   return window.location.pathname.replace(/\/+$/, '') === '/admin';
+}
+
+function redirectToCanonicalWebHost() {
+  if (window.itemCostApi || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') return;
+  if (!window.location.hostname.endsWith('.vercel.app') || window.location.hostname === CANONICAL_WEB_HOST) return;
+  const canonicalUrl = new URL(window.location.href);
+  canonicalUrl.hostname = CANONICAL_WEB_HOST;
+  window.location.replace(canonicalUrl.toString());
 }
 
 function readSessionUser() {

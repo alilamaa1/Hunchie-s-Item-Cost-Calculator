@@ -27,9 +27,10 @@ import {
 } from 'lucide-react';
 import './styles.css';
 import { createBrowserDemoApi } from './browserDemoApi.js';
+import { createWebApi, shouldUseWebApi } from './webApi.js';
 import hunchiesLogo from './assets/hunchies-logo.png';
 
-const api = window.itemCostApi ?? createBrowserDemoApi();
+const api = window.itemCostApi ?? (shouldUseWebApi() ? createWebApi() : createBrowserDemoApi());
 const CANONICAL_WEB_HOST = 'item-cost-calculator.vercel.app';
 const USER_SESSION_KEY = 'item_cost_current_user';
 const USER_ACCESS_SYNC_KEY = 'item_cost_users_updated_at';

@@ -106,6 +106,23 @@ export async function updateUser(id, input, options = {}) {
   return success(withoutPrivateFields(updated));
 }
 
+export async function deleteUser(id, options = {}) {
+  const context = requireDataFolder(options);
+  if (!context.ok) return context;
+
+  const usersResult = await loadUsers(context.data);
+  if (!usersResult.ok) return usersResult;
+
+  const existing = usersResult.data.find((user) => user.id === id);
+  if (!existing) {
+    return failureFromCode(ErrorCodes.USER_NOT_FOUND);
+  }
+
+  const save = await saveUsers(usersResult.data.filter((user) => user.id !== id), context.data, { backup: true });
+  if (!save.ok) return save;
+  return success({ deletedId: id });
+}
+
 export async function authenticateUser(input, options = {}) {
   const context = requireDataFolder(options);
   if (!context.ok) return context;

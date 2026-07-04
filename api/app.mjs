@@ -3,7 +3,7 @@ import { blobFileSystem, blobJsonStorage } from '../src/backend/storage/blobJson
 
 const services = createAppServices();
 const DATA_FOLDER = 'vercel-data';
-const adminMethods = new Set(['listUsers', 'createUser', 'updateUser']);
+const adminMethods = new Set(['listUsers', 'createUser', 'updateUser', 'deleteUser']);
 
 const handlers = Object.freeze({
   initializeApp: () => services.initializeApp(context()),
@@ -25,6 +25,7 @@ const handlers = Object.freeze({
   listUsers: () => services.listUsers(context()),
   createUser: (input) => services.createUser(input, context()),
   updateUser: (id, input) => services.updateUser(id, input, context()),
+  deleteUser: (id) => services.deleteUser(id, context()),
   authenticateUser: (input) => services.authenticateUser(input, context())
 });
 

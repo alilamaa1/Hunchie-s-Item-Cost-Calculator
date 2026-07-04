@@ -473,6 +473,21 @@ function AdminApp() {
     return true;
   }
 
+  async function deleteUser(id) {
+    setError('');
+    setNotice('');
+    const target = users.find((user) => user.id === id);
+    const result = await api.deleteUser(id);
+    if (!result.ok) {
+      setError(result.error?.message ?? 'Could not delete user.');
+      return false;
+    }
+    setUsers((current) => current.filter((user) => user.id !== id));
+    broadcastUserAccessUpdate();
+    if (target) setNotice(`${target.username} was deleted.`);
+    return true;
+  }
+
   function logoutAdmin() {
     api.setAdminKey?.('');
     setAuthorized(false);
@@ -570,7 +585,7 @@ function AdminApp() {
           ) : (
             <div className="user-list">
               {filteredUsers.map((user) => (
-                <UserRow key={user.id} user={user} onSave={saveUser} departmentOptions={visibleDepartmentOptions} onAddDepartment={saveDepartmentOption} />
+                <UserRow key={user.id} user={user} onSave={saveUser} onDelete={deleteUser} departmentOptions={visibleDepartmentOptions} onAddDepartment={saveDepartmentOption} />
               ))}
             </div>
           )}
@@ -580,8 +595,9 @@ function AdminApp() {
   );
 }
 
-function UserRow({ user, onSave, departmentOptions, onAddDepartment }) {
+function UserRow({ user, onSave, onDelete, departmentOptions, onAddDepartment }) {
   const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [draft, setDraft] = useState(() => userToDraft(user));
   const [saving, setSaving] = useState(false);
@@ -621,6 +637,12 @@ function UserRow({ user, onSave, departmentOptions, onAddDepartment }) {
     if (!ok) setDraft(userToDraft(user));
   }
 
+  async function confirmDelete() {
+    setSaving(true);
+    const ok = await onDelete(user.id);
+    if (!ok) setSaving(false);
+  }
+
   return (
     <div className={`user-row ${saving ? 'is-saving' : ''}`}>
       <div className="user-row-head">
@@ -640,7 +662,15 @@ function UserRow({ user, onSave, departmentOptions, onAddDepartment }) {
           <span />
         </label>
       </div>
-      {editing ? (
+      {confirmingDelete ? (
+        <div className="delete-confirm-row">
+          <span>Delete this user permanently?</span>
+          <div className="button-row">
+            <button type="button" className="danger-button" disabled={saving} onClick={confirmDelete}><Trash2 size={16} />{saving ? 'Deleting...' : 'Confirm Delete'}</button>
+            <button type="button" className="secondary-button" disabled={saving} onClick={() => setConfirmingDelete(false)}>Cancel</button>
+          </div>
+        </div>
+      ) : editing ? (
         <div className="user-edit-stack">
           <div className="user-edit-grid">
             <TextField label="Username" value={draft.username} onChange={(value) => setDraft({ ...draft, username: sanitizeUsernameInput(value) })} />
@@ -660,7 +690,10 @@ function UserRow({ user, onSave, departmentOptions, onAddDepartment }) {
           </div>
         </div>
       ) : (
-        <button type="button" className="secondary-button fit-button" onClick={() => setEditing(true)}><Pencil size={16} />Edit User</button>
+        <div className="button-row">
+          <button type="button" className="secondary-button fit-button" onClick={() => setEditing(true)}><Pencil size={16} />Edit User</button>
+          <button type="button" className="danger-button fit-button" onClick={() => setConfirmingDelete(true)}><Trash2 size={16} />Delete User</button>
+        </div>
       )}
     </div>
   );

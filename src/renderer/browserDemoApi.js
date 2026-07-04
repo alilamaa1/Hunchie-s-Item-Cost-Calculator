@@ -167,6 +167,12 @@ export function createBrowserDemoApi() {
       writeList(STORAGE_KEYS.users, users.map((user) => user.id === id ? updated : user));
       return ok(withoutPrivateFields(updated));
     },
+    deleteUser: async (id) => {
+      const users = readList(STORAGE_KEYS.users).map(normalizeStoredUser);
+      if (!users.some((user) => user.id === id)) return fail('This user could not be found.', 'USER_NOT_FOUND');
+      writeList(STORAGE_KEYS.users, users.filter((user) => user.id !== id));
+      return ok({ deletedId: id });
+    },
     authenticateUser: async (input) => {
       const username = normalizeUsername(input?.username);
       const password = String(input?.password ?? '');

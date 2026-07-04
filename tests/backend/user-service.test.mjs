@@ -7,6 +7,7 @@ import { initializeAppDataFolder } from '../../src/backend/storage/dataFolderIni
 import {
   authenticateUser,
   createUser,
+  deleteUser,
   listUsers,
   updateUser,
   verifyAdminKey
@@ -151,6 +152,24 @@ test('authenticates only active users with matching credentials', async () => {
 
     await updateUser(created.data.id, { isActive: false }, { dataFolder });
     assert.equal((await authenticateUser({ username: 'Ahmad_Lamaa', password: 'secret' }, { dataFolder })).error.code, ErrorCodes.USER_INACTIVE);
+  });
+});
+
+test('deletes users and prevents deleted users from authenticating', async () => {
+  await withDataFolder(async (dataFolder) => {
+    const created = await createUser({ username: 'DeleteMe', password: 'secret' }, { dataFolder });
+
+    const deleted = await deleteUser(created.data.id, { dataFolder });
+    const missing = await deleteUser(created.data.id, { dataFolder });
+    const listed = await listUsers({ dataFolder });
+    const login = await authenticateUser({ username: 'DeleteMe', password: 'secret' }, { dataFolder });
+
+    assert.equal(deleted.ok, true);
+    assert.equal(deleted.data.deletedId, created.data.id);
+    assert.equal(missing.ok, false);
+    assert.equal(missing.error.code, ErrorCodes.USER_NOT_FOUND);
+    assert.deepEqual(listed.data.map((user) => user.username), []);
+    assert.equal(login.error.code, ErrorCodes.LOGIN_INVALID);
   });
 });
 

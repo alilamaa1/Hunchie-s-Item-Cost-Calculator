@@ -18,6 +18,7 @@ const apiMethods = [
   'listUsers',
   'createUser',
   'updateUser',
+  'deleteUser',
   'authenticateUser'
 ];
 

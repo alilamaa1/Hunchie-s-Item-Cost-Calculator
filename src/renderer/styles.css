@@ -1255,6 +1255,21 @@ button {
   filter: grayscale(0.18);
 }
 
+.delete-confirm-row {
+  padding: 12px;
+  border: 1px solid #ead5d1;
+  border-radius: 8px;
+  color: #7a1414;
+  background: #f8eeeb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 850;
+}
+
 .user-row-head {
   display: flex;
   justify-content: space-between;

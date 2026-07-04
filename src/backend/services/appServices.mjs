@@ -22,6 +22,7 @@ import { loadSettings, updateSettings } from './settingsService.mjs';
 import {
   authenticateUser,
   createUser,
+  deleteUser,
   listUsers,
   updateUser,
   verifyAdminKey
@@ -49,6 +50,7 @@ export function createAppServices() {
     verifyAdminKey,
     listUsers,
     createUser,
+    deleteUser,
     updateUser,
     authenticateUser,
     calculateProductDraft: async (input, context) => {

@@ -670,7 +670,7 @@ button {
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  max-height: 180px;
+  max-height: 230px;
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -679,6 +679,30 @@ button {
   overflow-y: auto;
   display: grid;
   gap: 4px;
+}
+
+.department-option-search {
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--subtle);
+  background: var(--surface-soft);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  position: sticky;
+  top: 0;
+}
+
+.department-option-search input {
+  min-height: 32px;
+  border: 0;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  outline: none;
+  flex: 1;
 }
 
 .department-options button {
@@ -694,6 +718,15 @@ button {
 
 .department-options button:hover {
   background: var(--surface-soft);
+}
+
+.department-options .department-empty {
+  padding: 8px 9px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .field-hint {

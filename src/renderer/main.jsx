@@ -452,8 +452,17 @@ function AdminApp() {
       setError(result.error?.message ?? 'Could not update user.');
       return false;
     }
-    saveDepartmentOption(input.department);
-    setUsers((current) => current.map((user) => user.id === id ? result.data : user));
+    if (typeof input.department !== 'undefined') saveDepartmentOption(input.department);
+    setUsers((current) => current.map((user) => (
+      user.id === id
+        ? {
+            ...user,
+            ...result.data,
+            password: result.data.password ?? user.password,
+            isActive: typeof input?.isActive === 'boolean' ? input.isActive : result.data.isActive
+          }
+        : user
+    )));
     broadcastUserAccessUpdate();
     if (input.username || input.password || input.name || input.department) {
       setNotice(`${result.data.username} was updated.`);
@@ -656,9 +665,10 @@ function UserRow({ user, onSave, departmentOptions, onAddDepartment }) {
 
 function DepartmentField({ value, onChange, options, onAddOption }) {
   const [open, setOpen] = useState(false);
+  const [optionSearch, setOptionSearch] = useState('');
   const [message, setMessage] = useState('');
   const trimmedValue = String(value ?? '').trim();
-  const filteredOptions = filterDepartmentOptions(options, value);
+  const filteredOptions = filterDepartmentOptions(options, optionSearch || value);
 
   function addOption() {
     if (!trimmedValue) {
@@ -673,12 +683,14 @@ function DepartmentField({ value, onChange, options, onAddOption }) {
     onChange(trimmedValue);
     setMessage('Department option added.');
     setOpen(false);
+    setOptionSearch('');
   }
 
   function chooseOption(option) {
     onChange(option);
     setMessage('');
     setOpen(false);
+    setOptionSearch('');
   }
 
   return (
@@ -692,21 +704,37 @@ function DepartmentField({ value, onChange, options, onAddOption }) {
           onChange={(event) => {
             onChange(event.target.value);
             setMessage('');
+            setOptionSearch('');
             setOpen(true);
           }}
-          onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+          onBlur={() => window.setTimeout(() => {
+            if (!document.activeElement?.closest('.department-field')) setOpen(false);
+          }, 120)}
         />
         <button type="button" className="department-add-button" onMouseDown={(event) => event.preventDefault()} onClick={addOption} aria-label="Add department option">
           <Plus size={17} />
         </button>
       </div>
-      {open && filteredOptions.length > 0 && (
+      {open && (
         <div className="department-options" role="listbox">
-          {filteredOptions.map((option) => (
-            <button type="button" key={departmentKey(option)} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseOption(option)}>
-              {option}
-            </button>
-          ))}
+          <div className="department-option-search">
+            <Search size={15} />
+            <input
+              value={optionSearch}
+              placeholder="Search departments"
+              onFocus={() => setOpen(true)}
+              onChange={(event) => setOptionSearch(event.target.value)}
+            />
+          </div>
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((option) => (
+              <button type="button" key={departmentKey(option)} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseOption(option)}>
+                {option}
+              </button>
+            ))
+          ) : (
+            <span className="department-empty">No departments found.</span>
+          )}
         </div>
       )}
       {message && <small className="field-hint">{message}</small>}

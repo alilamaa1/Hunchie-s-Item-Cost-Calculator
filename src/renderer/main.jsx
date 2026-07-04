@@ -447,21 +447,24 @@ function AdminApp() {
   async function saveUser(id, input) {
     setError('');
     setNotice('');
+    let previousUser = null;
+    setUsers((current) => current.map((user) => {
+      if (user.id !== id) return user;
+      previousUser = user;
+      return mergeAdminUserUpdate(user, input);
+    }));
+
     const result = await api.updateUser(id, input);
     if (!result.ok) {
+      if (previousUser) {
+        setUsers((current) => current.map((user) => user.id === id ? previousUser : user));
+      }
       setError(result.error?.message ?? 'Could not update user.');
       return false;
     }
     if (typeof input.department !== 'undefined') saveDepartmentOption(input.department);
     setUsers((current) => current.map((user) => (
-      user.id === id
-        ? {
-            ...user,
-            ...result.data,
-            password: result.data.password ?? user.password,
-            isActive: typeof input?.isActive === 'boolean' ? input.isActive : result.data.isActive
-          }
-        : user
+      user.id === id ? mergeAdminUserUpdate(user, input, result.data) : user
     )));
     broadcastUserAccessUpdate();
     if (input.username || input.password || input.name || input.department) {
@@ -1871,6 +1874,19 @@ function userToDraft(user) {
     department: user.department ?? '',
     permissions: normalizePermissions(user.permissions),
     isActive: user.isActive
+  };
+}
+
+function mergeAdminUserUpdate(current, input = {}, saved = {}) {
+  return {
+    ...current,
+    ...saved,
+    username: input.username ?? saved.username ?? current.username,
+    password: input.password ?? saved.password ?? current.password,
+    name: input.name ?? saved.name ?? current.name,
+    department: input.department ?? saved.department ?? current.department,
+    permissions: input.permissions ?? saved.permissions ?? current.permissions,
+    isActive: typeof input.isActive === 'boolean' ? input.isActive : (typeof saved.isActive === 'boolean' ? saved.isActive : current.isActive)
   };
 }
 

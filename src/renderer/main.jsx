@@ -133,6 +133,7 @@ function MainApp() {
   const [activeView, setActiveView] = useState({ name: 'home' });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [productSearchScope, setProductSearchScope] = useState('all');
   const [materials, setMaterials] = useState([]);
   const [products, setProducts] = useState([]);
   const [settings, setSettings] = useState(null);
@@ -272,6 +273,7 @@ function MainApp() {
     activeView,
     setActiveView,
     searchQuery,
+    productSearchScope,
     materials,
     products,
     settings,
@@ -308,6 +310,11 @@ function MainApp() {
           title={title}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          searchScope={productSearchScope}
+          onSearchScopeChange={setProductSearchScope}
+          showSearchScope={activeView.name === 'products'}
+          onRefresh={refreshAll}
+          refreshing={loading}
           onMenu={() => setMobileNavOpen(true)}
           onSettings={() => setActiveView({ name: 'settings' })}
           settings={settings}
@@ -380,12 +387,13 @@ function AdminApp() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
+  const [usersRefreshing, setUsersRefreshing] = useState(false);
   const visibleDepartmentOptions = useMemo(() => mergeDepartmentOptions(departmentOptions, users.map((user) => user.department)), [departmentOptions, users]);
 
   async function loadUsers() {
-    setLoading(true);
+    setUsersRefreshing(true);
     const result = await api.listUsers();
-    setLoading(false);
+    setUsersRefreshing(false);
     if (!result.ok) {
       setError(result.error?.message ?? 'Could not load users.');
       return;
@@ -432,23 +440,24 @@ function AdminApp() {
     setForm(createEmptyUserForm());
     setNotice(`${result.data.username} can now access the program.`);
     broadcastUserAccessUpdate();
-    await loadUsers();
+    setUsers((current) => [...current.filter((user) => user.id !== result.data.id), result.data]);
+    loadUsers();
   }
 
   async function saveUser(id, input) {
     setError('');
     setNotice('');
-    setLoading(true);
     const result = await api.updateUser(id, input);
-    setLoading(false);
     if (!result.ok) {
       setError(result.error?.message ?? 'Could not update user.');
       return false;
     }
     saveDepartmentOption(input.department);
-    setNotice(`${result.data.username} was updated.`);
+    setUsers((current) => current.map((user) => user.id === id ? result.data : user));
     broadcastUserAccessUpdate();
-    await loadUsers();
+    if (input.username || input.password || input.name || input.department) {
+      setNotice(`${result.data.username} was updated.`);
+    }
     return true;
   }
 
@@ -502,6 +511,9 @@ function AdminApp() {
           <p>Create users and decide who can still access the Item Cost Calculator.</p>
         </div>
         <div className="button-row">
+          <button className="secondary-button" type="button" onClick={loadUsers} disabled={usersRefreshing}>
+            <RefreshCw size={16} />{usersRefreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
           <button className="secondary-button" type="button" onClick={logoutAdmin}><LogOut size={16} />Log Out</button>
           <a className="secondary-button" href="/">Back to program</a>
         </div>
@@ -538,7 +550,8 @@ function AdminApp() {
             <Search size={17} />
             <input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search username, name, or department" />
           </label>
-          {loading ? <Loading /> : users.length === 0 ? (
+          {usersRefreshing && users.length > 0 && <p className="muted">Refreshing users...</p>}
+          {usersRefreshing && users.length === 0 ? <Loading /> : users.length === 0 ? (
             <p className="muted">No users yet. Add the first user to unlock the main program.</p>
           ) : filteredUsers.length === 0 ? (
             <p className="muted">No users match that search.</p>
@@ -582,12 +595,22 @@ function UserRow({ user, onSave, departmentOptions, onAddDepartment }) {
   async function toggleAccess() {
     const nextActive = !draft.isActive;
     setDraft((current) => ({ ...current, isActive: nextActive }));
+    setSaving(true);
     const ok = await onSave(user.id, { isActive: nextActive });
+    setSaving(false);
     if (!ok) setDraft((current) => ({ ...current, isActive: !nextActive }));
   }
 
+  async function savePermissions(nextPermissions) {
+    setDraft((current) => ({ ...current, permissions: nextPermissions }));
+    setSaving(true);
+    const ok = await onSave(user.id, { permissions: nextPermissions });
+    setSaving(false);
+    if (!ok) setDraft(userToDraft(user));
+  }
+
   return (
-    <div className="user-row">
+    <div className={`user-row ${saving ? 'is-saving' : ''}`}>
       <div className="user-row-head">
         <div>
           <strong>{user.username}</strong>
@@ -598,10 +621,10 @@ function UserRow({ user, onSave, departmentOptions, onAddDepartment }) {
               {passwordVisible ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
           </span>
-          <span>{user.isActive ? 'Active access' : 'Access off'}</span>
+          <span>{draft.isActive ? 'Active access' : 'Access off'}</span>
         </div>
         <label className="switch" title="Toggle program access">
-          <input type="checkbox" checked={draft.isActive} onChange={toggleAccess} />
+          <input type="checkbox" checked={draft.isActive} disabled={saving} onChange={toggleAccess} />
           <span />
         </label>
       </div>
@@ -618,7 +641,7 @@ function UserRow({ user, onSave, departmentOptions, onAddDepartment }) {
               onAddOption={onAddDepartment}
             />
           </div>
-          <PermissionEditor permissions={draft.permissions} onChange={(permissions) => setDraft({ ...draft, permissions })} />
+          <PermissionEditor permissions={draft.permissions} onChange={savePermissions} />
           <div className="button-row">
             <button type="button" className="primary-button" disabled={saving} onClick={save}><Save size={17} />{saving ? 'Saving...' : 'Save'}</button>
             <button type="button" className="secondary-button" onClick={() => setEditing(false)}>Cancel</button>
@@ -811,7 +834,7 @@ function Sidebar({ activeView, canView, canEdit, onNavigate, onNewProduct, mobil
   );
 }
 
-function Header({ title, searchQuery, onSearchChange, onMenu, onSettings, settings, currentUser, canView, onLogout }) {
+function Header({ title, searchQuery, onSearchChange, searchScope, onSearchScopeChange, showSearchScope, onRefresh, refreshing, onMenu, onSettings, settings, currentUser, canView, onLogout }) {
   return (
     <header className="header">
       <button className="icon-button mobile-only" onClick={onMenu} aria-label="Open navigation">
@@ -821,10 +844,19 @@ function Header({ title, searchQuery, onSearchChange, onMenu, onSettings, settin
         <h2>{title}</h2>
         <p>1 USD = {(settings?.currency?.usdToLbp ?? 90000).toLocaleString()} LBP</p>
       </div>
-      <label className="search-box">
+      <div className={`search-box ${showSearchScope ? 'has-filter' : ''}`}>
         <Search size={17} />
         <input value={searchQuery} onChange={(event) => onSearchChange(event.target.value)} placeholder="Search" />
-      </label>
+        {showSearchScope && (
+          <select value={searchScope} onChange={(event) => onSearchScopeChange(event.target.value)} aria-label="Search scope">
+            <option value="all">All</option>
+            <option value="products">Products</option>
+          </select>
+        )}
+      </div>
+      <button className="icon-button" onClick={onRefresh} disabled={refreshing} aria-label="Refresh">
+        <RefreshCw size={19} />
+      </button>
       {canView('settings') && (
         <button className="icon-button" onClick={onSettings} aria-label="Settings">
           <Settings size={20} />
@@ -898,7 +930,8 @@ function ActionCard({ icon: Icon, eyebrow, title, text, onClick }) {
 }
 
 function RawMaterialsView({ materials, searchQuery, setActiveView, canEdit }) {
-  const filtered = filterByName(materials, searchQuery);
+  const [sortMode, setSortMode] = useState('default');
+  const filtered = sortItems(filterByName(materials, searchQuery), sortMode);
   const canEditMaterials = canEdit('materials');
 
   return (
@@ -908,6 +941,7 @@ function RawMaterialsView({ materials, searchQuery, setActiveView, canEdit }) {
         subtitle="Cost references used by products. These do not track stock."
         action={canEditMaterials ? <button className="primary-button" onClick={() => setActiveView({ name: 'material-new' })}><Plus size={18} />Add Raw Material</button> : <span className="readonly-pill">Read only</span>}
       />
+      <ListArrangeControl sortMode={sortMode} setSortMode={setSortMode} />
       {filtered.length === 0 ? (
         <EmptyState title="No raw materials yet" text="Add flour, sugar, eggs, or any material you use to make products." actionLabel={canEditMaterials ? 'Add Raw Material' : undefined} onAction={canEditMaterials ? () => setActiveView({ name: 'material-new' }) : undefined} />
       ) : (
@@ -1109,10 +1143,9 @@ function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, se
   );
 }
 
-function ProductsView({ products, materials, searchQuery, setActiveView, canEdit }) {
-  const [searchScope, setSearchScope] = useState('all');
+function ProductsView({ products, materials, searchQuery, productSearchScope, setActiveView, canEdit }) {
   const [sortMode, setSortMode] = useState('default');
-  const filtered = sortProducts(filterProducts(products, materials, searchQuery, searchScope), sortMode);
+  const filtered = sortItems(filterProducts(products, materials, searchQuery, productSearchScope), sortMode);
   const canEditProducts = canEdit('products');
 
   return (
@@ -1122,7 +1155,7 @@ function ProductsView({ products, materials, searchQuery, setActiveView, canEdit
         subtitle="Products are calculated from the latest raw material costs."
         action={canEditProducts ? <button className="primary-button" onClick={() => setActiveView({ name: 'product-new' })}><Plus size={18} />Create Product</button> : <span className="readonly-pill">Read only</span>}
       />
-      <ProductListControls searchScope={searchScope} setSearchScope={setSearchScope} sortMode={sortMode} setSortMode={setSortMode} />
+      <ListArrangeControl sortMode={sortMode} setSortMode={setSortMode} />
       {filtered.length === 0 ? (
         <EmptyState title="No products yet" text="Create a product and add raw materials to calculate total production cost." actionLabel={canEditProducts ? 'Create Product' : undefined} onAction={canEditProducts ? () => setActiveView({ name: 'product-new' }) : undefined} />
       ) : (
@@ -1148,21 +1181,11 @@ function ProductsView({ products, materials, searchQuery, setActiveView, canEdit
   );
 }
 
-function ProductListControls({ searchScope, setSearchScope, sortMode, setSortMode }) {
+function ListArrangeControl({ sortMode, setSortMode }) {
   return (
     <div className="product-controls">
-      <div className="segmented-control" aria-label="Product search filter">
-        {[
-          ['all', 'All'],
-          ['products', 'Products']
-        ].map(([value, label]) => (
-          <button type="button" key={value} className={searchScope === value ? 'active' : ''} onClick={() => setSearchScope(value)}>
-            {label}
-          </button>
-        ))}
-      </div>
       <label className="compact-select">
-        <span>Sort</span>
+        <span>Arrange</span>
         <select value={sortMode} onChange={(event) => setSortMode(event.target.value)}>
           <option value="default">Default</option>
           <option value="alphabetical">Alphabetical</option>
@@ -1727,11 +1750,11 @@ function filterProducts(products, materials, query, scope) {
   });
 }
 
-function sortProducts(products, mode) {
-  if (mode === 'alphabetical') return [...products].sort((first, second) => first.name.localeCompare(second.name) || first.id.localeCompare(second.id));
-  if (mode === 'newest') return [...products].sort((first, second) => dateValue(second.createdAt) - dateValue(first.createdAt));
-  if (mode === 'oldest') return [...products].sort((first, second) => dateValue(first.createdAt) - dateValue(second.createdAt));
-  return products;
+function sortItems(items, mode) {
+  if (mode === 'alphabetical') return [...items].sort((first, second) => first.name.localeCompare(second.name) || first.id.localeCompare(second.id));
+  if (mode === 'newest') return [...items].sort((first, second) => dateValue(second.createdAt) - dateValue(first.createdAt));
+  if (mode === 'oldest') return [...items].sort((first, second) => dateValue(first.createdAt) - dateValue(second.createdAt));
+  return items;
 }
 
 function dateValue(value) {

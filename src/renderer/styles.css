@@ -174,7 +174,7 @@ button {
   position: sticky;
   top: 0;
   z-index: 20;
-  height: 76px;
+  min-height: 76px;
   padding: 14px 28px;
   background: rgba(255, 255, 255, 0.9);
   border-bottom: 1px solid var(--border);
@@ -221,6 +221,24 @@ button {
   background: transparent;
 }
 
+.search-box select {
+  max-width: 116px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  color: var(--ink);
+  background: var(--surface-soft);
+  font-size: 13px;
+  font-weight: 800;
+  outline: none;
+}
+
+.search-box.has-filter {
+  min-width: 340px;
+  padding-right: 5px;
+}
+
 .ingredient-search {
   width: min(100%, 340px);
   min-width: 0;
@@ -237,6 +255,12 @@ button {
   background: #f3eee8;
   display: inline-grid;
   place-items: center;
+}
+
+.icon-button:disabled,
+.secondary-button:disabled {
+  opacity: 0.58;
+  cursor: wait;
 }
 
 .user-chip {
@@ -1190,6 +1214,12 @@ button {
   background: var(--surface-soft);
   display: grid;
   gap: 14px;
+  transition: opacity 160ms ease, filter 160ms ease;
+}
+
+.user-row.is-saving {
+  opacity: 0.55;
+  filter: grayscale(0.18);
 }
 
 .user-row-head {
@@ -1414,6 +1444,8 @@ button {
 
   .header {
     padding: 12px 16px;
+    height: auto;
+    flex-wrap: wrap;
   }
 
   .search-box {
@@ -1475,7 +1507,14 @@ button {
   }
 
   .search-box {
-    display: none;
+    order: 10;
+    flex: 1 0 100%;
+    min-width: 0;
+    margin-left: 0;
+  }
+
+  .search-box.has-filter {
+    min-width: 0;
   }
 
   .admin-search {

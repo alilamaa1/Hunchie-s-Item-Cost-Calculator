@@ -12,6 +12,12 @@ const CUSTOM_MEASURING_UNITS = Object.freeze([
   CustomUnits.TSP
 ]);
 
+const CUSTOM_MEASURING_ML = Object.freeze({
+  [CustomUnits.CUP]: 240,
+  [CustomUnits.TBSP]: 15,
+  [CustomUnits.TSP]: 5
+});
+
 export function isWeightUnit(unit) {
   return WEIGHT_UNITS.includes(unit);
 }
@@ -102,6 +108,11 @@ export function convertQuantity(quantity, fromUnit, toUnit, material = undefined
     });
   }
 
+  const densityConversion = convertByInferredDensity(quantity, fromUnit, toUnit, material);
+  if (densityConversion.ok) {
+    return densityConversion;
+  }
+
   if (isCountUnit(fromUnit) && isCountUnit(toUnit) && fromUnit === toUnit) {
     return success({
       quantity,
@@ -112,6 +123,44 @@ export function convertQuantity(quantity, fromUnit, toUnit, material = undefined
   return failureFromCode(ErrorCodes.UNIT_CONVERSION_MISSING);
 }
 
+function convertByInferredDensity(quantity, fromUnit, toUnit, material) {
+  const gramsPerMl = inferGramsPerMl(material);
+  if (!gramsPerMl) {
+    return failureFromCode(ErrorCodes.UNIT_CONVERSION_MISSING);
+  }
+
+  if (isVolumeUnit(fromUnit) && isWeightUnit(toUnit)) {
+    const grams = toMilliliters(quantity, fromUnit) * gramsPerMl;
+    return success({
+      quantity: toUnit === BaseUnits.KG ? grams / 1000 : grams,
+      unit: toUnit
+    });
+  }
+
+  if (isWeightUnit(fromUnit) && isVolumeUnit(toUnit)) {
+    const milliliters = toGrams(quantity, fromUnit) / gramsPerMl;
+    return success({
+      quantity: toUnit === BaseUnits.L ? milliliters / 1000 : milliliters,
+      unit: toUnit
+    });
+  }
+
+  return failureFromCode(ErrorCodes.UNIT_CONVERSION_MISSING);
+}
+
+function inferGramsPerMl(material) {
+  for (const unit of CUSTOM_MEASURING_UNITS) {
+    const conversion = material?.customConversions?.[unit];
+    if (!conversion || !isWeightUnit(conversion.unit) || !isPositiveNumber(conversion.quantity)) {
+      continue;
+    }
+
+    return toGrams(conversion.quantity, conversion.unit) / CUSTOM_MEASURING_ML[unit];
+  }
+
+  return null;
+}
+
 function toGrams(quantity, unit) {
   return unit === BaseUnits.KG ? quantity * 1000 : quantity;
 }
@@ -119,4 +168,3 @@ function toGrams(quantity, unit) {
 function toMilliliters(quantity, unit) {
   return unit === BaseUnits.L ? quantity * 1000 : quantity;
 }
-

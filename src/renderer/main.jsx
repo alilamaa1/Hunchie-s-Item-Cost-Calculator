@@ -6,6 +6,8 @@ import {
   Cake,
   Check,
   ChevronRight,
+  Eye,
+  EyeOff,
   Home,
   KeyRound,
   LogOut,
@@ -31,6 +33,29 @@ const api = window.itemCostApi ?? createBrowserDemoApi();
 const USER_SESSION_KEY = 'item_cost_current_user';
 const USER_ACCESS_SYNC_KEY = 'item_cost_users_updated_at';
 const USER_ACCESS_CHANNEL = 'item-cost-user-access';
+const DEPARTMENT_OPTIONS_KEY = 'item_cost_department_options';
+
+const sectionConfig = [
+  { id: 'home', label: 'Home', editable: false },
+  { id: 'materials', label: 'Raw Materials', editable: true },
+  { id: 'products', label: 'Products', editable: true },
+  { id: 'settings', label: 'Settings', editable: true }
+];
+
+const defaultPermissions = Object.fromEntries(sectionConfig.map((section) => [
+  section.id,
+  { visible: true, edit: section.editable }
+]));
+
+function createEmptyUserForm() {
+  return {
+    username: '',
+    password: '',
+    name: '',
+    department: '',
+    permissions: normalizePermissions(defaultPermissions)
+  };
+}
 
 const emptyRawMaterialForm = {
   name: '',
@@ -109,6 +134,9 @@ function MainApp() {
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const userPermissions = useMemo(() => normalizePermissions(currentUser?.permissions), [currentUser?.permissions]);
+  const canView = (section) => canViewSection(userPermissions, section);
+  const canEdit = (section) => canEditSection(userPermissions, section);
 
   async function refreshAll() {
     if (!api) {
@@ -161,9 +189,10 @@ function MainApp() {
           handleLogout();
           return;
         }
-        if (latest.username !== currentUser.username) {
-          sessionStorage.setItem(USER_SESSION_KEY, JSON.stringify(latest));
-          setCurrentUser(latest);
+        const sessionUser = withoutUserPassword(latest);
+        if (JSON.stringify(sessionUser) !== JSON.stringify(currentUser)) {
+          sessionStorage.setItem(USER_SESSION_KEY, JSON.stringify(sessionUser));
+          setCurrentUser(sessionUser);
         }
       });
     }
@@ -184,7 +213,16 @@ function MainApp() {
       window.removeEventListener('item-cost-users-updated', syncCurrentUser);
       channel?.close();
     };
-  }, [currentUser?.id, currentUser?.username]);
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    if (canView(sectionForView(activeView.name))) return;
+    const fallback = firstVisibleSection(userPermissions);
+    if (fallback && activeView.name !== fallback) {
+      setActiveView({ name: fallback });
+    }
+  }, [activeView.name, currentUser, userPermissions]);
 
   function handleLogin(user) {
     sessionStorage.setItem(USER_SESSION_KEY, JSON.stringify(user));
@@ -231,6 +269,10 @@ function MainApp() {
     materials,
     products,
     settings,
+    currentUser,
+    permissions: userPermissions,
+    canView,
+    canEdit,
     refreshAll,
     afterMutation,
     setError
@@ -240,6 +282,8 @@ function MainApp() {
     <div className="app-shell">
       <Sidebar
         activeView={activeView.name}
+        canView={canView}
+        canEdit={canEdit}
         onNavigate={(name) => {
           setActiveView({ name });
           setSearchQuery('');
@@ -262,6 +306,7 @@ function MainApp() {
           onSettings={() => setActiveView({ name: 'settings' })}
           settings={settings}
           currentUser={currentUser}
+          canView={canView}
           onLogout={handleLogout}
         />
 
@@ -308,8 +353,8 @@ function LoginView({ onLogin }) {
           <p>Your workspace is locked until an active user signs in.</p>
         </div>
         {error && <Notice type="error" message={error} onClose={() => setError('')} />}
-        <TextField label="Username" value={form.username} onChange={(value) => setForm({ ...form, username: value })} />
-        <TextField label="Password" type="password" value={form.password} onChange={(value) => setForm({ ...form, password: value })} />
+        <TextField label="Username" value={form.username} onChange={(value) => setForm({ ...form, username: sanitizeUsernameInput(value) })} />
+        <PasswordField label="Password" value={form.password} onChange={(value) => setForm({ ...form, password: value })} />
         <button className="primary-button full" disabled={loading}>
           <KeyRound size={18} />
           {loading ? 'Checking...' : 'Open Program'}
@@ -323,10 +368,13 @@ function AdminApp() {
   const [authorized, setAuthorized] = useState(false);
   const [pin, setPin] = useState('');
   const [users, setUsers] = useState([]);
-  const [form, setForm] = useState({ username: '', password: '' });
+  const [form, setForm] = useState(() => createEmptyUserForm());
+  const [userSearch, setUserSearch] = useState('');
+  const [departmentOptions, setDepartmentOptions] = useState(() => readDepartmentOptions());
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
+  const visibleDepartmentOptions = useMemo(() => mergeDepartmentOptions(departmentOptions, users.map((user) => user.department)), [departmentOptions, users]);
 
   async function loadUsers() {
     setLoading(true);
@@ -337,6 +385,9 @@ function AdminApp() {
       return;
     }
     setUsers(result.data);
+    const mergedOptions = mergeDepartmentOptions(departmentOptions, result.data.map((user) => user.department));
+    setDepartmentOptions(mergedOptions);
+    writeDepartmentOptions(mergedOptions);
   }
 
   async function submitPin(event) {
@@ -368,7 +419,8 @@ function AdminApp() {
       setError(result.error?.message ?? 'Could not create user.');
       return;
     }
-    setForm({ username: '', password: '' });
+    saveDepartmentOption(form.department);
+    setForm(createEmptyUserForm());
     setNotice(`${result.data.username} can now access the program.`);
     broadcastUserAccessUpdate();
     await loadUsers();
@@ -382,11 +434,21 @@ function AdminApp() {
       setError(result.error?.message ?? 'Could not update user.');
       return false;
     }
+    saveDepartmentOption(input.department);
     setNotice(`${result.data.username} was updated.`);
     broadcastUserAccessUpdate();
     await loadUsers();
     return true;
   }
+
+  function saveDepartmentOption(value) {
+    const nextOptions = mergeDepartmentOptions(departmentOptions, [value]);
+    setDepartmentOptions(nextOptions);
+    writeDepartmentOptions(nextOptions);
+    return nextOptions.some((option) => departmentKey(option) === departmentKey(value));
+  }
+
+  const filteredUsers = filterUsers(users, userSearch);
 
   if (!authorized) {
     return (
@@ -427,8 +489,16 @@ function AdminApp() {
             <UserPlus size={20} />
             <h3>Add User</h3>
           </div>
-          <TextField label="Username" value={form.username} onChange={(value) => setForm({ ...form, username: value })} placeholder="New user" />
-          <TextField label="Password" type="password" value={form.password} onChange={(value) => setForm({ ...form, password: value })} />
+          <TextField label="Username" value={form.username} onChange={(value) => setForm({ ...form, username: sanitizeUsernameInput(value) })} placeholder="New_user" />
+          <TextField label="Password" value={form.password} onChange={(value) => setForm({ ...form, password: value })} />
+          <TextField label="Name" value={form.name} onChange={(value) => setForm({ ...form, name: value })} placeholder="Ahmad Lamaa" />
+          <DepartmentField
+            value={form.department}
+            onChange={(value) => setForm({ ...form, department: value })}
+            options={visibleDepartmentOptions}
+            onAddOption={saveDepartmentOption}
+          />
+          <PermissionEditor permissions={form.permissions} onChange={(permissions) => setForm({ ...form, permissions })} />
           <button className="primary-button full">
             <UserPlus size={18} />
             Add User
@@ -439,12 +509,18 @@ function AdminApp() {
             <User size={20} />
             <h3>Users</h3>
           </div>
+          <label className="search-box admin-search">
+            <Search size={17} />
+            <input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search username, name, or department" />
+          </label>
           {loading ? <Loading /> : users.length === 0 ? (
             <p className="muted">No users yet. Add the first user to unlock the main program.</p>
+          ) : filteredUsers.length === 0 ? (
+            <p className="muted">No users match that search.</p>
           ) : (
             <div className="user-list">
-              {users.map((user) => (
-                <UserRow key={user.id} user={user} onSave={saveUser} />
+              {filteredUsers.map((user) => (
+                <UserRow key={user.id} user={user} onSave={saveUser} departmentOptions={visibleDepartmentOptions} onAddDepartment={saveDepartmentOption} />
               ))}
             </div>
           )}
@@ -454,20 +530,24 @@ function AdminApp() {
   );
 }
 
-function UserRow({ user, onSave }) {
+function UserRow({ user, onSave, departmentOptions, onAddDepartment }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ username: user.username, password: '', isActive: user.isActive });
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [draft, setDraft] = useState(() => userToDraft(user));
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setDraft({ username: user.username, password: '', isActive: user.isActive });
-  }, [user.id, user.username, user.isActive]);
+    setDraft(userToDraft(user));
+  }, [user.id, user.username, user.password, user.name, user.department, user.permissions, user.isActive]);
 
   async function save() {
     setSaving(true);
     const ok = await onSave(user.id, {
       username: draft.username,
-      ...(draft.password ? { password: draft.password } : {}),
+      password: draft.password,
+      name: draft.name,
+      department: draft.department,
+      permissions: draft.permissions,
       isActive: draft.isActive
     });
     setSaving(false);
@@ -486,6 +566,13 @@ function UserRow({ user, onSave }) {
       <div className="user-row-head">
         <div>
           <strong>{user.username}</strong>
+          <span>{user.name || 'No name'}{user.department ? ` · ${user.department}` : ''}</span>
+          <span className="admin-password-line">
+            Password: {passwordVisible ? user.password : '****'}
+            <button type="button" className="inline-icon-button" onClick={() => setPasswordVisible((current) => !current)} aria-label={passwordVisible ? 'Hide admin password' : 'Show admin password'}>
+              {passwordVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </span>
           <span>{user.isActive ? 'Active access' : 'Access off'}</span>
         </div>
         <label className="switch" title="Toggle program access">
@@ -494,11 +581,23 @@ function UserRow({ user, onSave }) {
         </label>
       </div>
       {editing ? (
-        <div className="user-edit-grid">
-          <TextField label="Username" value={draft.username} onChange={(value) => setDraft({ ...draft, username: value })} />
-          <TextField label="New Password" type="password" value={draft.password} onChange={(value) => setDraft({ ...draft, password: value })} placeholder="Leave blank to keep" />
-          <button type="button" className="primary-button" disabled={saving} onClick={save}><Save size={17} />{saving ? 'Saving...' : 'Save'}</button>
-          <button type="button" className="secondary-button" onClick={() => setEditing(false)}>Cancel</button>
+        <div className="user-edit-stack">
+          <div className="user-edit-grid">
+            <TextField label="Username" value={draft.username} onChange={(value) => setDraft({ ...draft, username: sanitizeUsernameInput(value) })} />
+            <TextField label="Password" value={draft.password} onChange={(value) => setDraft({ ...draft, password: value })} />
+            <TextField label="Name" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
+            <DepartmentField
+              value={draft.department}
+              onChange={(value) => setDraft({ ...draft, department: value })}
+              options={departmentOptions}
+              onAddOption={onAddDepartment}
+            />
+          </div>
+          <PermissionEditor permissions={draft.permissions} onChange={(permissions) => setDraft({ ...draft, permissions })} />
+          <div className="button-row">
+            <button type="button" className="primary-button" disabled={saving} onClick={save}><Save size={17} />{saving ? 'Saving...' : 'Save'}</button>
+            <button type="button" className="secondary-button" onClick={() => setEditing(false)}>Cancel</button>
+          </div>
         </div>
       ) : (
         <button type="button" className="secondary-button fit-button" onClick={() => setEditing(true)}><Pencil size={16} />Edit User</button>
@@ -507,8 +606,128 @@ function UserRow({ user, onSave }) {
   );
 }
 
+function DepartmentField({ value, onChange, options, onAddOption }) {
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState('');
+  const trimmedValue = String(value ?? '').trim();
+  const filteredOptions = filterDepartmentOptions(options, value);
+
+  function addOption() {
+    if (!trimmedValue) {
+      setMessage('Enter a department first.');
+      return;
+    }
+    if (departmentExists(options, trimmedValue)) {
+      setMessage('Department already exists.');
+      return;
+    }
+    onAddOption(trimmedValue);
+    onChange(trimmedValue);
+    setMessage('Department option added.');
+    setOpen(false);
+  }
+
+  function chooseOption(option) {
+    onChange(option);
+    setMessage('');
+    setOpen(false);
+  }
+
+  return (
+    <label className="field department-field">
+      <span>Department</span>
+      <div className="department-input-wrap">
+        <input
+          value={value ?? ''}
+          placeholder="Kitchen"
+          onFocus={() => setOpen(true)}
+          onChange={(event) => {
+            onChange(event.target.value);
+            setMessage('');
+            setOpen(true);
+          }}
+          onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+        />
+        <button type="button" className="department-add-button" onMouseDown={(event) => event.preventDefault()} onClick={addOption} aria-label="Add department option">
+          <Plus size={17} />
+        </button>
+      </div>
+      {open && filteredOptions.length > 0 && (
+        <div className="department-options" role="listbox">
+          {filteredOptions.map((option) => (
+            <button type="button" key={departmentKey(option)} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseOption(option)}>
+              {option}
+            </button>
+          ))}
+        </div>
+      )}
+      {message && <small className="field-hint">{message}</small>}
+    </label>
+  );
+}
+
+function PermissionEditor({ permissions, onChange }) {
+  const normalized = normalizePermissions(permissions);
+  const homeVisible = normalized.home?.visible !== false;
+
+  function updateSection(sectionId, patch) {
+    const current = normalized[sectionId] ?? { visible: true, edit: true };
+    const section = sectionConfig.find((item) => item.id === sectionId);
+    const next = { ...current, ...patch };
+    if (!next.visible || !section?.editable) next.edit = false;
+    onChange({ ...normalized, [sectionId]: next });
+  }
+
+  return (
+    <div className="permission-editor">
+      <div className="permission-editor-head">
+        <span>Section</span>
+        <span>Visible</span>
+        <span>Edit</span>
+      </div>
+      {sectionConfig.map((section) => {
+        const value = normalized[section.id] ?? { visible: true, edit: section.editable };
+        const homeLocked = section.id !== 'home' && !homeVisible;
+        const displayedVisible = homeLocked ? false : value.visible;
+        const displayedEdit = homeLocked ? false : value.edit;
+        const editDisabled = homeLocked || !displayedVisible || !section.editable;
+        return (
+          <div className={`permission-row ${homeLocked ? 'is-home-locked' : ''}`} data-section={section.id} key={section.id}>
+            <strong>{section.label}</strong>
+            <label className={`mini-toggle ${homeLocked ? 'is-disabled' : ''}`}>
+              <input
+                type="checkbox"
+                aria-label={`${section.label} visible`}
+                checked={displayedVisible}
+                disabled={homeLocked}
+                onChange={(event) => updateSection(section.id, { visible: event.target.checked })}
+              />
+              <span>Visible</span>
+            </label>
+            <label className={`mini-toggle ${editDisabled ? 'is-disabled' : ''}`}>
+              <input
+                type="checkbox"
+                aria-label={`${section.label} edit`}
+                checked={displayedEdit}
+                disabled={editDisabled}
+                onChange={(event) => updateSection(section.id, { edit: event.target.checked })}
+              />
+              <span>Edit</span>
+            </label>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ViewRouter({ context }) {
-  const { activeView } = context;
+  const { activeView, canView, canEdit } = context;
+  const section = sectionForView(activeView.name);
+
+  if (!canView(section)) return <AccessDenied section={section} />;
+  if (['material-new', 'material-edit'].includes(activeView.name) && !canEdit('materials')) return <AccessDenied section="materials" mode="edit" />;
+  if (['product-new', 'product-edit'].includes(activeView.name) && !canEdit('products')) return <AccessDenied section="products" mode="edit" />;
 
   if (activeView.name === 'materials') return <RawMaterialsView {...context} />;
   if (activeView.name === 'material-new') return <RawMaterialForm {...context} mode="create" />;
@@ -522,13 +741,13 @@ function ViewRouter({ context }) {
   return <HomeView {...context} />;
 }
 
-function Sidebar({ activeView, onNavigate, onNewProduct, mobileOpen, onClose }) {
+function Sidebar({ activeView, canView, canEdit, onNavigate, onNewProduct, mobileOpen, onClose }) {
   const nav = [
     { id: 'home', label: 'Home', icon: Home },
     { id: 'materials', label: 'Raw Materials', icon: Wheat },
     { id: 'products', label: 'Products', icon: Cake },
     { id: 'settings', label: 'Settings', icon: Settings }
-  ];
+  ].filter((item) => canView(item.id));
 
   return (
     <>
@@ -556,16 +775,18 @@ function Sidebar({ activeView, onNavigate, onNewProduct, mobileOpen, onClose }) 
             );
           })}
         </nav>
-        <button className="primary-button full" onClick={onNewProduct}>
-          <Plus size={18} />
-          New Product
-        </button>
+        {canEdit('products') && (
+          <button className="primary-button full" onClick={onNewProduct}>
+            <Plus size={18} />
+            New Product
+          </button>
+        )}
       </aside>
     </>
   );
 }
 
-function Header({ title, searchQuery, onSearchChange, onMenu, onSettings, settings, currentUser, onLogout }) {
+function Header({ title, searchQuery, onSearchChange, onMenu, onSettings, settings, currentUser, canView, onLogout }) {
   return (
     <header className="header">
       <button className="icon-button mobile-only" onClick={onMenu} aria-label="Open navigation">
@@ -579,9 +800,11 @@ function Header({ title, searchQuery, onSearchChange, onMenu, onSettings, settin
         <Search size={17} />
         <input value={searchQuery} onChange={(event) => onSearchChange(event.target.value)} placeholder="Search" />
       </label>
-      <button className="icon-button" onClick={onSettings} aria-label="Settings">
-        <Settings size={20} />
-      </button>
+      {canView('settings') && (
+        <button className="icon-button" onClick={onSettings} aria-label="Settings">
+          <Settings size={20} />
+        </button>
+      )}
       <div className="user-chip" title={currentUser?.username}>
         <User size={16} />
         <span>{currentUser?.username}</span>
@@ -593,7 +816,7 @@ function Header({ title, searchQuery, onSearchChange, onMenu, onSettings, settin
   );
 }
 
-function HomeView({ setActiveView, materials, products }) {
+function HomeView({ setActiveView, materials, products, canView, canEdit }) {
   const [greeting] = useState(() => homeGreetings[Math.floor(Math.random() * homeGreetings.length)]);
 
   return (
@@ -604,30 +827,36 @@ function HomeView({ setActiveView, materials, products }) {
         <p>Track raw material costs and calculate exactly how much each product costs to make.</p>
       </section>
       <section className="stats-grid">
-        <ActionCard
-          icon={Wheat}
-          eyebrow="Raw Materials"
-          title={`${materials.length} Cost References`}
-          text="Manage base costs, units, and custom food conversions."
-          onClick={() => setActiveView({ name: 'materials' })}
-        />
-        <ActionCard
-          icon={Cake}
-          eyebrow="Products"
-          title={`${products.length} Products Costed`}
-          text="Build products from raw materials and see live totals."
-          onClick={() => setActiveView({ name: 'products' })}
-        />
+        {canView('materials') && (
+          <ActionCard
+            icon={Wheat}
+            eyebrow="Raw Materials"
+            title={`${materials.length} Cost References`}
+            text="Manage base costs, units, and custom food conversions."
+            onClick={() => setActiveView({ name: 'materials' })}
+          />
+        )}
+        {canView('products') && (
+          <ActionCard
+            icon={Cake}
+            eyebrow="Products"
+            title={`${products.length} Products Costed`}
+            text="Build products from raw materials and see live totals."
+            onClick={() => setActiveView({ name: 'products' })}
+          />
+        )}
       </section>
-      <section className="cta-band">
-        <div>
-          <h3>Create a product cost</h3>
-          <p>Select raw materials, enter quantities, and calculate production cost in USD and LBP.</p>
-        </div>
-        <button className="white-button" onClick={() => setActiveView({ name: 'product-new' })}>
-          Open Builder <ChevronRight size={17} />
-        </button>
-      </section>
+      {canEdit('products') && (
+        <section className="cta-band">
+          <div>
+            <h3>Create a product cost</h3>
+            <p>Select raw materials, enter quantities, and calculate production cost in USD and LBP.</p>
+          </div>
+          <button className="white-button" onClick={() => setActiveView({ name: 'product-new' })}>
+            Open Builder <ChevronRight size={17} />
+          </button>
+        </section>
+      )}
     </div>
   );
 }
@@ -643,34 +872,23 @@ function ActionCard({ icon: Icon, eyebrow, title, text, onClick }) {
   );
 }
 
-function RawMaterialsView({ materials, searchQuery, setActiveView }) {
+function RawMaterialsView({ materials, searchQuery, setActiveView, canEdit }) {
   const filtered = filterByName(materials, searchQuery);
+  const canEditMaterials = canEdit('materials');
 
   return (
     <div className="page-stack">
       <PageTitle
         title="Raw Materials"
         subtitle="Cost references used by products. These do not track stock."
-        action={<button className="primary-button" onClick={() => setActiveView({ name: 'material-new' })}><Plus size={18} />Add Raw Material</button>}
+        action={canEditMaterials ? <button className="primary-button" onClick={() => setActiveView({ name: 'material-new' })}><Plus size={18} />Add Raw Material</button> : <span className="readonly-pill">Read only</span>}
       />
       {filtered.length === 0 ? (
-        <EmptyState title="No raw materials yet" text="Add flour, sugar, eggs, or any material you use to make products." actionLabel="Add Raw Material" onAction={() => setActiveView({ name: 'material-new' })} />
+        <EmptyState title="No raw materials yet" text="Add flour, sugar, eggs, or any material you use to make products." actionLabel={canEditMaterials ? 'Add Raw Material' : undefined} onAction={canEditMaterials ? () => setActiveView({ name: 'material-new' }) : undefined} />
       ) : (
         <div className="card-grid">
           {filtered.map((material) => (
-            <button key={material.id} className="material-card" onClick={() => setActiveView({ name: 'material-detail', id: material.id })}>
-              <div className="material-card-head">
-                <div className="card-icon"><Wheat size={22} /></div>
-                <div>
-                  <h3>{material.name}</h3>
-                  <span>Base: {material.baseUnit}</span>
-                </div>
-              </div>
-              <div className="cost-lines">
-                <CostLine label="USD Cost" value={`$${formatUsd(material.costPerBaseUnitUSD)} / ${material.baseUnit}`} />
-                <CostLine label="LBP Cost" value={`${Math.round(material.costPerBaseUnitLBP).toLocaleString()} / ${material.baseUnit}`} />
-              </div>
-            </button>
+            <RawMaterialCard key={material.id} material={material} onClick={() => setActiveView({ name: 'material-detail', id: material.id })} />
           ))}
         </div>
       )}
@@ -678,9 +896,48 @@ function RawMaterialsView({ materials, searchQuery, setActiveView }) {
   );
 }
 
-function RawMaterialDetail({ id, materials, setActiveView, afterMutation, setError }) {
+function RawMaterialCard({ material, onClick }) {
+  const displayCost = rawMaterialDisplayCost(material);
+  const boughtCost = boughtUnitDisplayCost(material);
+
+  return (
+    <button className="material-card" onClick={onClick}>
+      <div className="material-card-head">
+        <div className="card-icon"><Wheat size={22} /></div>
+        <div>
+          <h3>{material.name}</h3>
+          <span>Base: {material.baseUnit}</span>
+        </div>
+      </div>
+      <div className="cost-lines">
+        <CostLine label={`USD / ${displayCost.label}`} value={`$${formatUsd(displayCost.usd)}`} />
+        <CostLine label={`LBP / ${displayCost.label}`} value={`${Math.round(displayCost.lbp).toLocaleString()} LBP`} />
+        <CostLine label={`USD / ${boughtCost.label}`} value={`$${formatUsd(boughtCost.usd)}`} />
+        <CostLine label={`LBP / ${boughtCost.label}`} value={`${Math.round(boughtCost.lbp).toLocaleString()} LBP`} />
+      </div>
+    </button>
+  );
+}
+
+function RawMaterialCostSummary({ material }) {
+  const displayCost = rawMaterialDisplayCost(material);
+  const boughtCost = boughtUnitDisplayCost(material);
+
+  return (
+    <div className="mini-summary">
+      <CostLine label={`USD / ${displayCost.label}`} value={`$${formatUsd(displayCost.usd)}`} />
+      <CostLine label={`LBP / ${displayCost.label}`} value={`${Math.round(displayCost.lbp).toLocaleString()} LBP`} />
+      <CostLine label={`USD / ${boughtCost.label}`} value={`$${formatUsd(boughtCost.usd)}`} />
+      <CostLine label={`LBP / ${boughtCost.label}`} value={`${Math.round(boughtCost.lbp).toLocaleString()} LBP`} />
+    </div>
+  );
+}
+
+function RawMaterialDetail({ id, materials, setActiveView, afterMutation, setError, canEdit }) {
   const material = materials.find((item) => item.id === id);
   if (!material) return <MissingView label="raw material" onBack={() => setActiveView({ name: 'materials' })} />;
+  const canEditMaterials = canEdit('materials');
+  const displayCost = rawMaterialDisplayCost(material);
 
   async function remove() {
     const result = await api.deleteRawMaterial(material.id);
@@ -698,18 +955,29 @@ function RawMaterialDetail({ id, materials, setActiveView, afterMutation, setErr
         <div>
           <span className="eyebrow">{material.id}</span>
           <h2>{material.name}</h2>
-          <p>Cost per {material.baseUnit}: ${formatUsd(material.costPerBaseUnitUSD)} / {Math.round(material.costPerBaseUnitLBP).toLocaleString()} LBP</p>
+          <p>Cost per {displayCost.label}: ${formatUsd(displayCost.usd)} / {Math.round(displayCost.lbp).toLocaleString()} LBP</p>
         </div>
-        <div className="button-row">
-          <button className="secondary-button" onClick={() => setActiveView({ name: 'material-edit', id: material.id })}><Pencil size={16} />Edit</button>
-          <button className="danger-button" onClick={remove}><Trash2 size={16} />Delete</button>
-        </div>
+        {canEditMaterials ? (
+          <div className="button-row">
+            <button className="secondary-button" onClick={() => setActiveView({ name: 'material-edit', id: material.id })}><Pencil size={16} />Edit</button>
+            <button className="danger-button" onClick={remove}><Trash2 size={16} />Delete</button>
+          </div>
+        ) : <span className="readonly-pill">Read only</span>}
       </div>
       <div className="two-column">
         <InfoPanel title="Purchase">
           <CostLine label="Bought quantity" value={`${material.purchaseQuantity} ${material.purchaseUnit}`} />
           <CostLine label="Purchase price USD" value={`$${formatUsd(material.purchasePriceUSD)}`} />
           <CostLine label="Purchase price LBP" value={`${Math.round(material.purchasePriceLBP).toLocaleString()} LBP`} />
+          {(() => {
+            const boughtCost = boughtUnitDisplayCost(material);
+            return (
+              <>
+                <CostLine label={`USD / ${boughtCost.label}`} value={`$${formatUsd(boughtCost.usd)}`} />
+                <CostLine label={`LBP / ${boughtCost.label}`} value={`${Math.round(boughtCost.lbp).toLocaleString()} LBP`} />
+              </>
+            );
+          })()}
         </InfoPanel>
         <InfoPanel title="Conversions">
           {Object.keys(material.customConversions ?? {}).length === 0 ? <p className="muted">No custom conversions.</p> : Object.entries(material.customConversions).map(([unit, conversion]) => (
@@ -760,7 +1028,11 @@ function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, se
   return (
     <form className="page-stack form-page" onSubmit={submit}>
       <BackButton onClick={() => setActiveView(mode === 'edit' ? { name: 'material-detail', id } : { name: 'materials' })} />
-      <PageTitle title={mode === 'edit' ? 'Edit Raw Material' : 'Add Raw Material'} subtitle="Enter the bought quantity and price. The app calculates cost per base unit." />
+      <PageTitle
+        title={mode === 'edit' ? 'Edit Raw Material' : 'Add Raw Material'}
+        subtitle="Enter the bought quantity and price. The app shows useful cost references for purchasing and display."
+        action={mode === 'edit' ? <button type="submit" className="primary-button" disabled={saving}><Save size={18} />{saving ? 'Saving...' : 'Save Raw Material'}</button> : undefined}
+      />
       <div className="raw-material-layout">
         <InfoPanel title="Ingredient">
           <div className="compact-form-grid">
@@ -775,12 +1047,7 @@ function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, se
             <TextField label="Bought Price" type="number" value={form.purchasePrice} onChange={(value) => setFormValue(setForm, 'purchasePrice', value)} />
             <SelectField label="Currency" value={form.purchaseCurrency} onChange={(value) => setFormValue(setForm, 'purchaseCurrency', value)} options={[['USD', 'USD'], ['LBP', 'LBP']]} />
           </div>
-          {draft?.ok && (
-            <div className="mini-summary">
-              <CostLine label="USD / base unit" value={`$${formatUsd(draft.data.costPerBaseUnitUSD)} / ${draft.data.baseUnit}`} />
-              <CostLine label="LBP / base unit" value={`${Math.round(draft.data.costPerBaseUnitLBP).toLocaleString()} / ${draft.data.baseUnit}`} />
-            </div>
-          )}
+          {draft?.ok && <RawMaterialCostSummary material={draft.data} />}
         </InfoPanel>
       </div>
 
@@ -817,18 +1084,19 @@ function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, se
   );
 }
 
-function ProductsView({ products, searchQuery, setActiveView }) {
+function ProductsView({ products, searchQuery, setActiveView, canEdit }) {
   const filtered = filterByName(products, searchQuery);
+  const canEditProducts = canEdit('products');
 
   return (
     <div className="page-stack">
       <PageTitle
         title="Products"
         subtitle="Products are calculated from the latest raw material costs."
-        action={<button className="primary-button" onClick={() => setActiveView({ name: 'product-new' })}><Plus size={18} />Create Product</button>}
+        action={canEditProducts ? <button className="primary-button" onClick={() => setActiveView({ name: 'product-new' })}><Plus size={18} />Create Product</button> : <span className="readonly-pill">Read only</span>}
       />
       {filtered.length === 0 ? (
-        <EmptyState title="No products yet" text="Create a product and add raw materials to calculate total production cost." actionLabel="Create Product" onAction={() => setActiveView({ name: 'product-new' })} />
+        <EmptyState title="No products yet" text="Create a product and add raw materials to calculate total production cost." actionLabel={canEditProducts ? 'Create Product' : undefined} onAction={canEditProducts ? () => setActiveView({ name: 'product-new' }) : undefined} />
       ) : (
         <div className="card-grid">
           {filtered.map((product) => (
@@ -852,8 +1120,10 @@ function ProductsView({ products, searchQuery, setActiveView }) {
   );
 }
 
-function ProductDetail({ id, setActiveView, afterMutation, setError }) {
+function ProductDetail({ id, setActiveView, afterMutation, setError, canEdit }) {
   const [product, setProduct] = useState(null);
+  const [ingredientSearch, setIngredientSearch] = useState('');
+  const canEditProducts = canEdit('products');
 
   useEffect(() => {
     api.getProduct(id).then((result) => {
@@ -872,6 +1142,7 @@ function ProductDetail({ id, setActiveView, afterMutation, setError }) {
   }
 
   if (!product) return <Loading />;
+  const filteredIngredients = filterProductIngredients(product.ingredients, ingredientSearch);
 
   return (
     <div className="page-stack">
@@ -883,14 +1154,19 @@ function ProductDetail({ id, setActiveView, afterMutation, setError }) {
           <h2>{product.name}</h2>
           <p>Total cost: ${formatUsd(product.totalCostUSD)} / {Math.round(product.totalCostLBP).toLocaleString()} LBP</p>
         </div>
-        <div className="button-row">
-          <button className="secondary-button light" onClick={() => setActiveView({ name: 'product-edit', id })}><Pencil size={16} />Edit</button>
-          <button className="danger-button" onClick={remove}><Trash2 size={16} />Delete</button>
-        </div>
+        {canEditProducts ? (
+          <div className="button-row">
+            <button className="secondary-button light" onClick={() => setActiveView({ name: 'product-edit', id })}><Pencil size={16} />Edit</button>
+            <button className="danger-button" onClick={remove}><Trash2 size={16} />Delete</button>
+          </div>
+        ) : <span className="readonly-pill light">Read only</span>}
       </div>
       <InfoPanel title="Ingredient Breakdown">
+        <IngredientSearchBar value={ingredientSearch} onChange={setIngredientSearch} placeholder="Search ingredients" />
         <div className="table-list">
-          {product.ingredients.map((ingredient, index) => (
+          {filteredIngredients.length === 0 ? (
+            <p className="muted">No ingredients match that search.</p>
+          ) : filteredIngredients.map((ingredient, index) => (
             <div className="table-row" key={`${ingredient.rawMaterialId}-${index}`}>
               <span>{ingredient.rawMaterialName ?? ingredient.rawMaterialId}</span>
               <span>{ingredient.quantity} {ingredient.unit}</span>
@@ -908,6 +1184,7 @@ function ProductForm({ mode, id, products, materials, setActiveView, afterMutati
   const [form, setForm] = useState(() => existing ? productToForm(existing) : emptyProductForm);
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [ingredientSearch, setIngredientSearch] = useState('');
 
   useEffect(() => {
     setForm((current) => ensureTrailingEmptyRow(current));
@@ -940,23 +1217,34 @@ function ProductForm({ mode, id, products, materials, setActiveView, afterMutati
     await afterMutation({ name: 'product-detail', id: result.data.id });
   }
 
+  const ingredientRows = filterProductFormIngredients(form.ingredients, materials, ingredientSearch);
+
   return (
     <form className="page-stack" onSubmit={submit}>
       <BackButton onClick={() => setActiveView(mode === 'edit' ? { name: 'product-detail', id } : { name: 'products' })} />
-      <PageTitle title={mode === 'edit' ? 'Edit Product' : 'Product Builder'} subtitle="Choose raw materials and quantities. Costs update live from backend calculations." />
+      <PageTitle
+        title={mode === 'edit' ? 'Edit Product' : 'Product Builder'}
+        subtitle="Choose raw materials and quantities. Costs update live from backend calculations."
+        action={mode === 'edit' ? <button type="submit" className="primary-button" disabled={saving}><Save size={18} />{saving ? 'Saving...' : 'Save Product'}</button> : undefined}
+      />
       <div className="builder-layout">
         <div className="builder-main">
           <InfoPanel title="Product">
             <TextField label="Product Name" value={form.name} onChange={(value) => setFormValue(setForm, 'name', value)} placeholder="Chocolate Cake" />
           </InfoPanel>
           <InfoPanel title="Ingredients">
+            <IngredientSearchBar value={ingredientSearch} onChange={setIngredientSearch} placeholder="Search raw materials to add" />
             <div className="ingredient-list">
-              {form.ingredients.map((ingredient, index) => (
+              {ingredientRows.length === 0 ? (
+                <p className="muted">No ingredients match that search.</p>
+              ) : ingredientRows.map(({ ingredient, index }) => (
                 <IngredientRow
                   key={index}
                   index={index}
                   ingredient={ingredient}
                   materials={materials}
+                  selectedMaterialIds={form.ingredients.map((item, itemIndex) => itemIndex === index ? null : item.rawMaterialId).filter(Boolean)}
+                  materialSearchQuery={ingredientSearch}
                   onChange={(next) => updateIngredient(setForm, index, next)}
                   onRemove={() => removeIngredient(setForm, index)}
                   portionCost={draft?.ok ? draft.data.ingredients.find((item) => item.rawMaterialId === ingredient.rawMaterialId)?.portionCostUSD : null}
@@ -979,13 +1267,25 @@ function ProductForm({ mode, id, products, materials, setActiveView, afterMutati
   );
 }
 
-function IngredientRow({ ingredient, materials, onChange, onRemove, portionCost }) {
+function IngredientSearchBar({ value, onChange, placeholder }) {
+  return (
+    <label className="search-box ingredient-search">
+      <Search size={16} />
+      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+    </label>
+  );
+}
+
+function IngredientRow({ ingredient, materials, selectedMaterialIds, materialSearchQuery, onChange, onRemove, portionCost }) {
   const selected = materials.find((item) => item.id === ingredient.rawMaterialId);
   const units = selected ? availableUnits(selected) : [['', 'Unit']];
+  const selectedIds = new Set(selectedMaterialIds);
+  const materialOptions = materials.filter((item) => item.id === ingredient.rawMaterialId || !selectedIds.has(item.id));
+  const visibleMaterialOptions = filterMaterialOptions(materialOptions, materialSearchQuery, ingredient.rawMaterialId);
 
   return (
     <div className="ingredient-row">
-      <SelectField label="Raw Material" value={ingredient.rawMaterialId} onChange={(value) => onChange({ ...ingredient, rawMaterialId: value, unit: defaultUnit(materials.find((item) => item.id === value)) })} options={[['', 'Select material'], ...materials.map((item) => [item.id, item.name])]} />
+      <SelectField label="Raw Material" value={ingredient.rawMaterialId} onChange={(value) => onChange({ ...ingredient, rawMaterialId: value, unit: defaultUnit(materials.find((item) => item.id === value)) })} options={[['', materialSearchQuery.trim() ? 'Select matching material' : 'Select material'], ...visibleMaterialOptions.map((item) => [item.id, item.name])]} />
       <TextField label="Quantity" type="number" value={ingredient.quantity} onChange={(value) => onChange({ ...ingredient, quantity: value })} />
       <SelectField label="Unit" value={ingredient.unit} onChange={(value) => onChange({ ...ingredient, unit: value })} options={units} />
       <div className="portion-cost">
@@ -997,11 +1297,13 @@ function IngredientRow({ ingredient, materials, onChange, onRemove, portionCost 
   );
 }
 
-function SettingsView({ settings, refreshAll, setError }) {
+function SettingsView({ settings, refreshAll, setError, canEdit }) {
   const [rate, setRate] = useState(settings?.currency?.usdToLbp ?? 90000);
   const [notice, setNotice] = useState('');
+  const canEditSettings = canEdit('settings');
 
   async function save() {
+    if (!canEditSettings) return;
     const result = await api.updateSettings({ currency: { usdToLbp: Number(rate) } });
     if (!result.ok) {
       setError(result.error.message);
@@ -1017,14 +1319,28 @@ function SettingsView({ settings, refreshAll, setError }) {
       {notice && <Notice type="success" message={notice} onClose={() => setNotice('')} />}
       <InfoPanel title="Currency">
         <div className="form-grid">
-          <TextField label="1 USD equals LBP" type="number" value={rate} onChange={setRate} />
+          <TextField label="1 USD equals LBP" type="number" value={rate} onChange={setRate} disabled={!canEditSettings} />
         </div>
         <p className="muted">Changing the exchange rate affects displayed LBP/USD values. Raw material base costs remain stored safely.</p>
-        <button className="primary-button" onClick={save}><Check size={17} />Save Settings</button>
+        {canEditSettings ? <button className="primary-button" onClick={save}><Check size={17} />Save Settings</button> : <span className="readonly-pill">Read only</span>}
       </InfoPanel>
       <InfoPanel title="Data Folder">
         <p className="path-text">{settings?.dataFolder}</p>
       </InfoPanel>
+    </div>
+  );
+}
+
+function AccessDenied({ section, mode = 'view' }) {
+  return (
+    <div className="empty-state">
+      <div className="admin-badge"><ShieldCheck size={26} /></div>
+      <h3>{mode === 'edit' ? 'Read-only access' : 'Section unavailable'}</h3>
+      <p>
+        {mode === 'edit'
+          ? `Your account can view ${sectionLabel(section)}, but editing is turned off.`
+          : `Your account does not have access to ${sectionLabel(section)}.`}
+      </p>
     </div>
   );
 }
@@ -1047,7 +1363,7 @@ function EmptyState({ title, text, actionLabel, onAction }) {
       <div className="card-icon large"><Plus size={28} /></div>
       <h3>{title}</h3>
       <p>{text}</p>
-      <button className="primary-button" onClick={onAction}><Plus size={18} />{actionLabel}</button>
+      {actionLabel && onAction && <button className="primary-button" onClick={onAction}><Plus size={18} />{actionLabel}</button>}
     </div>
   );
 }
@@ -1070,11 +1386,28 @@ function CostLine({ label, value }) {
   );
 }
 
-function TextField({ label, value, onChange, type = 'text', placeholder = '' }) {
+function TextField({ label, value, onChange, type = 'text', placeholder = '', disabled = false }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <input type={type} value={value ?? ''} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
+      <input type={type} value={value ?? ''} placeholder={placeholder} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function PasswordField({ label, value, onChange }) {
+  const [visible, setVisible] = useState(false);
+  const Icon = visible ? EyeOff : Eye;
+
+  return (
+    <label className="field password-field">
+      <span>{label}</span>
+      <div className="password-input-wrap">
+        <input type={visible ? 'text' : 'password'} value={value ?? ''} onChange={(event) => onChange(event.target.value)} />
+        <button type="button" className="password-toggle" onClick={() => setVisible((current) => !current)} aria-label={visible ? 'Hide password' : 'Show password'}>
+          <Icon size={18} />
+        </button>
+      </div>
     </label>
   );
 }
@@ -1258,10 +1591,146 @@ function defaultUnit(material) {
   return material ? material.baseUnit : '';
 }
 
+function rawMaterialDisplayCost(material) {
+  const basisQuantity = ['g', 'ml'].includes(material.baseUnit) ? 100 : 1;
+  return {
+    label: `${basisQuantity} ${material.baseUnit}`,
+    usd: Number(material.costPerBaseUnitUSD ?? 0) * basisQuantity,
+    lbp: Number(material.costPerBaseUnitLBP ?? 0) * basisQuantity
+  };
+}
+
+function boughtUnitDisplayCost(material) {
+  const quantity = Number(material.purchaseQuantity);
+  const divisor = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+  return {
+    label: `1 ${material.purchaseUnit}`,
+    usd: Number(material.purchasePriceUSD ?? 0) / divisor,
+    lbp: Number(material.purchasePriceLBP ?? 0) / divisor
+  };
+}
+
 function filterByName(items, query) {
   const needle = query.trim().toLowerCase();
   if (!needle) return items;
   return items.filter((item) => item.name.toLowerCase().includes(needle));
+}
+
+function filterProductIngredients(ingredients, query) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return ingredients;
+  return ingredients.filter((ingredient) => [
+    ingredient.rawMaterialName,
+    ingredient.rawMaterialId,
+    ingredient.quantity,
+    ingredient.unit
+  ].some((value) => String(value ?? '').toLowerCase().includes(needle)));
+}
+
+function filterProductFormIngredients(ingredients, materials, query) {
+  const rows = ingredients.map((ingredient, index) => ({ ingredient, index }));
+  const needle = query.trim().toLowerCase();
+  if (!needle) return rows;
+  return rows.filter(({ ingredient }) => {
+    if (!ingredient.rawMaterialId) return true;
+    const material = materials.find((item) => item.id === ingredient.rawMaterialId);
+    return [
+      material?.name,
+      ingredient.rawMaterialId,
+      ingredient.quantity,
+      ingredient.unit
+    ].some((value) => String(value ?? '').toLowerCase().includes(needle));
+  });
+}
+
+function filterMaterialOptions(materials, query, selectedId) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return materials;
+  return materials.filter((material) => (
+    material.id === selectedId ||
+    material.name.toLowerCase().includes(needle) ||
+    material.id.toLowerCase().includes(needle)
+  ));
+}
+
+function filterUsers(users, query) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return users;
+  return users.filter((user) => [
+    user.username,
+    user.name,
+    user.department
+  ].some((value) => String(value ?? '').toLowerCase().includes(needle)));
+}
+
+function filterDepartmentOptions(options, query) {
+  const needle = String(query ?? '').trim().toLowerCase();
+  const cleanOptions = mergeDepartmentOptions(options);
+  if (!needle) return cleanOptions;
+  return cleanOptions.filter((option) => option.toLowerCase().includes(needle));
+}
+
+function mergeDepartmentOptions(...groups) {
+  const byKey = new Map();
+  groups.flat().forEach((value) => {
+    const department = String(value ?? '').trim();
+    const key = departmentKey(department);
+    if (key && !byKey.has(key)) byKey.set(key, department);
+  });
+  return [...byKey.values()].sort((first, second) => first.localeCompare(second));
+}
+
+function departmentExists(options, value) {
+  const key = departmentKey(value);
+  return Boolean(key) && options.some((option) => departmentKey(option) === key);
+}
+
+function departmentKey(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function userToDraft(user) {
+  return {
+    username: user.username,
+    password: user.password ?? '',
+    name: user.name ?? '',
+    department: user.department ?? '',
+    permissions: normalizePermissions(user.permissions),
+    isActive: user.isActive
+  };
+}
+
+function normalizePermissions(input = {}) {
+  return Object.fromEntries(sectionConfig.map((section) => {
+    const current = input?.[section.id] ?? {};
+    const visible = typeof current.visible === 'boolean' ? current.visible : true;
+    const edit = visible && section.editable && (typeof current.edit === 'boolean' ? current.edit : section.editable);
+    return [section.id, { visible, edit }];
+  }));
+}
+
+function canViewSection(permissions, section) {
+  if (permissions?.home?.visible === false) return false;
+  return Boolean(permissions?.[section]?.visible);
+}
+
+function canEditSection(permissions, section) {
+  return canViewSection(permissions, section) && Boolean(permissions?.[section]?.edit);
+}
+
+function sectionForView(viewName) {
+  if (viewName?.startsWith('material')) return 'materials';
+  if (viewName?.startsWith('product')) return 'products';
+  if (viewName === 'settings') return 'settings';
+  return 'home';
+}
+
+function firstVisibleSection(permissions) {
+  return sectionConfig.find((section) => canViewSection(permissions, section.id))?.id ?? null;
+}
+
+function sectionLabel(sectionId) {
+  return sectionConfig.find((section) => section.id === sectionId)?.label ?? 'this section';
 }
 
 function formatUsd(value) {
@@ -1282,6 +1751,28 @@ function readSessionUser() {
   } catch {
     return null;
   }
+}
+
+function readDepartmentOptions() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DEPARTMENT_OPTIONS_KEY));
+    return Array.isArray(parsed) ? mergeDepartmentOptions(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDepartmentOptions(options) {
+  localStorage.setItem(DEPARTMENT_OPTIONS_KEY, JSON.stringify(mergeDepartmentOptions(options)));
+}
+
+function withoutUserPassword(user) {
+  const { password, ...sessionUser } = user ?? {};
+  return sessionUser;
+}
+
+function sanitizeUsernameInput(value) {
+  return String(value ?? '').replace(/\s+/g, '_');
 }
 
 function broadcastUserAccessUpdate() {

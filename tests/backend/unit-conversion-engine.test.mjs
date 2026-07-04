@@ -99,6 +99,20 @@ test('converts raw-material-specific cup, tbsp, and tsp conversions', () => {
   assert.equal(convertQuantity(1, 'tsp', 'kg', flour).data.quantity, 0.0027);
 });
 
+test('infers liquid volume and weight conversion from saved food conversions', () => {
+  const milk = {
+    baseUnit: 'g',
+    customConversions: {
+      cup: { quantity: 247.2, unit: 'g' },
+      tbsp: { quantity: 15.45, unit: 'g' },
+      tsp: { quantity: 5.15, unit: 'g' }
+    }
+  };
+
+  assert.equal(convertQuantity(1, 'L', 'g', milk).data.quantity, 1030);
+  assert.equal(convertQuantity(100, 'g', 'ml', milk).data.quantity, 100 / 1.03);
+});
+
 test('rejects custom unit when conversion is missing or invalid', () => {
   assert.equal(convertQuantity(1, 'cup', 'kg', {}).error.code, ErrorCodes.UNIT_CONVERSION_MISSING);
   assert.equal(
@@ -112,4 +126,3 @@ test('compatible ingredient units include base, compatible, and configured custo
   assert.deepEqual(getCompatibleUnits('L', { cup: { quantity: 240, unit: 'ml' } }), ['L', 'ml', 'cup']);
   assert.deepEqual(getCompatibleUnits('piece', {}), ['piece']);
 });
-

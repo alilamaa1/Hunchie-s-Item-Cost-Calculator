@@ -58,6 +58,25 @@ test('raw material draft normalizes price and cost per base unit without writing
   });
 });
 
+test('raw material draft converts liquid purchase volume to gram base unit using food conversion density', () => {
+  const result = calculateRawMaterialDraft(flourInput({
+    name: 'Milk',
+    baseUnit: 'g',
+    purchaseQuantity: 1,
+    purchaseUnit: 'L',
+    purchasePrice: 2,
+    customConversions: {
+      cup: { quantity: 247.2, unit: 'g' },
+      tbsp: { quantity: 15.45, unit: 'g' },
+      tsp: { quantity: 5.15, unit: 'g' }
+    }
+  }), { exchangeRate: 90000 });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.costPerBaseUnitUSD, 2 / 1030);
+  assert.equal(Number((result.data.costPerBaseUnitUSD * 100).toFixed(6)), 0.194175);
+});
+
 test('raw material validation rejects expected invalid inputs', () => {
   assert.equal(calculateRawMaterialDraft(flourInput({ name: ' ' })).error.code, ErrorCodes.RAW_MATERIAL_NAME_REQUIRED);
   assert.equal(calculateRawMaterialDraft(flourInput({ purchaseQuantity: 0 })).error.code, ErrorCodes.PURCHASE_QUANTITY_INVALID);
@@ -67,7 +86,7 @@ test('raw material validation rejects expected invalid inputs', () => {
   assert.equal(calculateRawMaterialDraft(flourInput({ baseUnit: 'stone' })).error.code, ErrorCodes.BASE_UNIT_UNSUPPORTED);
   assert.equal(calculateRawMaterialDraft(flourInput({ purchaseUnit: 'boxful' })).error.code, ErrorCodes.PURCHASE_UNIT_UNSUPPORTED);
   assert.equal(calculateRawMaterialDraft(flourInput({ purchaseCurrency: 'EUR' })).error.code, ErrorCodes.CURRENCY_UNSUPPORTED);
-  assert.equal(calculateRawMaterialDraft(flourInput({ purchaseUnit: 'ml' })).error.code, ErrorCodes.UNIT_CONVERSION_MISSING);
+  assert.equal(calculateRawMaterialDraft(flourInput({ purchaseUnit: 'ml', customConversions: {} })).error.code, ErrorCodes.UNIT_CONVERSION_MISSING);
 });
 
 test('creates raw material with ID, timestamps, saved JSON, and preserves existing records', async () => {

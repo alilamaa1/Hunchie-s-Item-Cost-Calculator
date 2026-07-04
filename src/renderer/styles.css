@@ -221,6 +221,13 @@ button {
   background: transparent;
 }
 
+.ingredient-search {
+  width: min(100%, 340px);
+  min-width: 0;
+  height: 38px;
+  margin-left: 0;
+}
+
 .icon-button {
   width: 39px;
   height: 39px;
@@ -576,11 +583,138 @@ button {
   background: var(--surface);
 }
 
+.field input:disabled,
+.field select:disabled,
+.field textarea:disabled {
+  cursor: not-allowed;
+  color: var(--subtle);
+  background: var(--surface-soft);
+}
+
+.password-input-wrap {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+}
+
+.department-field {
+  position: relative;
+}
+
+.department-input-wrap {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+}
+
+.department-input-wrap input {
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px 0 0 8px;
+  padding: 9px 4px 9px 12px;
+  flex: 1;
+  outline: none;
+  background: transparent;
+}
+
+.department-add-button {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--ink);
+  background: transparent;
+  display: inline-grid;
+  place-items: center;
+}
+
+.department-add-button:hover {
+  background: var(--surface-soft);
+}
+
+.department-options {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 180px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  overflow-y: auto;
+  display: grid;
+  gap: 4px;
+}
+
+.department-options button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  font-weight: 750;
+}
+
+.department-options button:hover {
+  background: var(--surface-soft);
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.password-input-wrap input {
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px 0 0 8px;
+  padding: 9px 4px 9px 12px;
+  flex: 1;
+}
+
+.password-toggle {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  display: inline-grid;
+  place-items: center;
+}
+
+.password-toggle:hover {
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
 .field input:focus,
 .field select:focus,
-.field textarea:focus {
+.field textarea:focus,
+.password-input-wrap:focus-within,
+.department-input-wrap:focus-within {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(52, 49, 45, 0.1);
+}
+
+.password-input-wrap input:focus,
+.department-input-wrap input:focus {
+  border: 0;
+  box-shadow: none;
 }
 
 .field input::placeholder,
@@ -737,6 +871,23 @@ button {
   padding: 12px;
   border-radius: 8px;
   background: var(--surface-soft);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 120px;
+  gap: 14px;
+  align-items: center;
+}
+
+.table-row span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-row span:nth-child(2),
+.table-row strong {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .notice {
@@ -872,9 +1023,15 @@ button {
 
 .admin-grid {
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-columns: 390px minmax(0, 1fr);
   gap: 18px;
   align-items: start;
+}
+
+.admin-search {
+  width: 100%;
+  min-width: 0;
+  margin-left: 0;
 }
 
 .panel-title-row {
@@ -926,6 +1083,28 @@ button {
   font-weight: 800;
 }
 
+.admin-password-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inline-icon-button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  display: inline-grid;
+  place-items: center;
+}
+
+.inline-icon-button:hover {
+  color: var(--ink);
+  background: var(--surface);
+}
+
 .switch {
   position: relative;
   width: 48px;
@@ -970,9 +1149,101 @@ button {
 
 .user-edit-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   align-items: end;
+}
+
+.user-edit-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.permission-editor {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfaf8;
+  display: grid;
+  gap: 8px;
+}
+
+.permission-editor-head,
+.permission-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 82px 82px;
+  gap: 8px;
+  align-items: center;
+}
+
+.permission-editor-head {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.permission-row {
+  min-height: 38px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.permission-row.is-home-locked {
+  color: var(--subtle);
+  background: var(--surface-soft);
+}
+
+.permission-row strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.permission-row.is-home-locked strong {
+  color: var(--subtle);
+}
+
+.mini-toggle {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.mini-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.mini-toggle.is-disabled {
+  color: var(--subtle);
+  opacity: 0.55;
+}
+
+.mini-toggle.is-disabled input {
+  cursor: not-allowed;
+}
+
+.readonly-pill {
+  width: fit-content;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.readonly-pill.light {
+  color: var(--primary-dark);
+  background: white;
 }
 
 .fit-button {
@@ -1026,7 +1297,9 @@ button {
   .conversion-grid,
   .builder-layout,
   .admin-grid,
-  .user-edit-grid {
+  .user-edit-grid,
+  .permission-editor-head,
+  .permission-row {
     grid-template-columns: 1fr;
   }
 
@@ -1062,6 +1335,10 @@ button {
 
   .search-box {
     display: none;
+  }
+
+  .admin-search {
+    display: flex;
   }
 
   .user-chip {

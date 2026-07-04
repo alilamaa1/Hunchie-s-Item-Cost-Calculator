@@ -11,6 +11,13 @@ const defaultStorage = Object.freeze({
   writeJsonFile
 });
 
+const sectionPermissions = Object.freeze({
+  home: { visible: true, edit: false },
+  materials: { visible: true, edit: true },
+  products: { visible: true, edit: true },
+  settings: { visible: true, edit: true }
+});
+
 export function verifyAdminKey(pin) {
   return String(pin ?? '') === ADMIN_PIN
     ? success({ authorized: true })
@@ -22,7 +29,7 @@ export async function listUsers(options = {}) {
   if (!context.ok) return context;
   const users = await loadUsers(context.data);
   if (!users.ok) return users;
-  return success(users.data.map(withoutPrivateFields));
+  return success(users.data);
 }
 
 export async function createUser(input, options = {}) {
@@ -35,7 +42,7 @@ export async function createUser(input, options = {}) {
   const normalized = normalizeUserInput(input);
   if (!normalized.ok) return normalized;
 
-  if (findUserByNormalizedName(usersResult.data, normalized.data.username)) {
+  if (findUserByUsername(usersResult.data, normalized.data.username)) {
     return failureFromCode(ErrorCodes.USER_ALREADY_EXISTS);
   }
 
@@ -44,6 +51,9 @@ export async function createUser(input, options = {}) {
     id: nextUserId(usersResult.data),
     username: normalized.data.username,
     password: normalized.data.password,
+    name: normalized.data.name,
+    department: normalized.data.department,
+    permissions: normalized.data.permissions,
     isActive: true,
     createdAt: now,
     updatedAt: now
@@ -68,11 +78,14 @@ export async function updateUser(id, input, options = {}) {
 
   const normalized = normalizeUserInput({
     username: input?.username ?? existing.username,
-    password: input?.password ?? existing.password
+    password: input?.password ?? existing.password,
+    name: input?.name ?? existing.name,
+    department: input?.department ?? existing.department,
+    permissions: input?.permissions ?? existing.permissions
   });
   if (!normalized.ok) return normalized;
 
-  const duplicate = findUserByNormalizedName(usersResult.data, normalized.data.username, id);
+  const duplicate = findUserByUsername(usersResult.data, normalized.data.username, id);
   if (duplicate) {
     return failureFromCode(ErrorCodes.USER_ALREADY_EXISTS);
   }
@@ -81,6 +94,9 @@ export async function updateUser(id, input, options = {}) {
     ...existing,
     username: normalized.data.username,
     password: normalized.data.password,
+    name: normalized.data.name,
+    department: normalized.data.department,
+    permissions: normalized.data.permissions,
     isActive: typeof input?.isActive === 'boolean' ? input.isActive : existing.isActive,
     updatedAt: getNow(context.data)
   };
@@ -97,9 +113,9 @@ export async function authenticateUser(input, options = {}) {
   const usersResult = await loadUsers(context.data);
   if (!usersResult.ok) return usersResult;
 
-  const username = normalizeName(input?.username);
+  const username = normalizeUsername(input?.username);
   const password = String(input?.password ?? '');
-  const user = usersResult.data.find((item) => normalizeName(item.username) === username && item.password === password);
+  const user = usersResult.data.find((item) => item.username === username && item.password === password);
 
   if (!user) {
     return failureFromCode(ErrorCodes.LOGIN_INVALID);
@@ -115,7 +131,7 @@ export async function authenticateUser(input, options = {}) {
 export async function loadUsers(context) {
   const result = await context.storage.readJsonFile(getAppFilePaths(context.dataFolder).users);
   if (!result.ok) return result;
-  return Array.isArray(result.data) ? success(result.data) : failureFromCode(ErrorCodes.FILE_INVALID_JSON);
+  return Array.isArray(result.data) ? success(result.data.map(normalizeStoredUser)) : failureFromCode(ErrorCodes.FILE_INVALID_JSON);
 }
 
 async function saveUsers(users, context, options = {}) {
@@ -132,8 +148,11 @@ async function saveUsers(users, context, options = {}) {
 }
 
 function normalizeUserInput(input) {
-  const username = String(input?.username ?? '').trim();
+  const username = normalizeUsername(input?.username);
   const password = String(input?.password ?? '');
+  const name = String(input?.name ?? '').trim();
+  const department = String(input?.department ?? '').trim();
+  const permissions = normalizePermissions(input?.permissions);
 
   if (!username) {
     return failureFromCode(ErrorCodes.USERNAME_REQUIRED);
@@ -143,16 +162,33 @@ function normalizeUserInput(input) {
     return failureFromCode(ErrorCodes.PASSWORD_REQUIRED);
   }
 
-  return success({ username, password });
+  return success({ username, password, name, department, permissions });
 }
 
-function findUserByNormalizedName(users, username, ignoredId = undefined) {
-  const target = normalizeName(username);
-  return users.find((user) => user.id !== ignoredId && normalizeName(user.username) === target);
+function normalizeStoredUser(user) {
+  return {
+    ...user,
+    name: String(user?.name ?? '').trim(),
+    department: String(user?.department ?? '').trim(),
+    permissions: normalizePermissions(user?.permissions)
+  };
 }
 
-function normalizeName(value) {
-  return String(value ?? '').trim().toLowerCase();
+function normalizePermissions(input) {
+  return Object.fromEntries(Object.entries(sectionPermissions).map(([section, defaults]) => {
+    const current = input?.[section] ?? {};
+    const visible = typeof current.visible === 'boolean' ? current.visible : defaults.visible;
+    const edit = visible && defaults.edit && (typeof current.edit === 'boolean' ? current.edit : defaults.edit);
+    return [section, { visible, edit }];
+  }));
+}
+
+function findUserByUsername(users, username, ignoredId = undefined) {
+  return users.find((user) => user.id !== ignoredId && user.username === username);
+}
+
+function normalizeUsername(value) {
+  return String(value ?? '').trim().replace(/\s+/g, '_');
 }
 
 function nextUserId(users) {

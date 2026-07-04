@@ -11,6 +11,19 @@ const defaultSettings = {
   appVersion: '1.0.0'
 };
 
+const sectionPermissions = Object.freeze({
+  home: { visible: true, edit: false },
+  materials: { visible: true, edit: true },
+  products: { visible: true, edit: true },
+  settings: { visible: true, edit: true }
+});
+
+const metricSpoonsMl = Object.freeze({
+  cup: 240,
+  tbsp: 15,
+  tsp: 5
+});
+
 export function createBrowserDemoApi() {
   return {
     initializeApp: async () => ok({ dataFolder: defaultSettings.dataFolder }),
@@ -103,12 +116,12 @@ export function createBrowserDemoApi() {
     verifyAdminKey: async (pin) => {
       return String(pin ?? '') === '494' ? ok({ authorized: true }) : fail('Admin key is incorrect.', 'ADMIN_KEY_INVALID');
     },
-    listUsers: async () => ok(readList(STORAGE_KEYS.users).map(withoutPrivateFields)),
+    listUsers: async () => ok(readList(STORAGE_KEYS.users).map(normalizeStoredUser)),
     createUser: async (input) => {
-      const users = readList(STORAGE_KEYS.users);
+      const users = readList(STORAGE_KEYS.users).map(normalizeStoredUser);
       const normalized = normalizeUserInput(input);
       if (!normalized.ok) return normalized;
-      if (users.some((user) => normalizeName(user.username) === normalizeName(normalized.data.username))) {
+      if (users.some((user) => user.username === normalized.data.username)) {
         return fail('user already exists.', 'USER_ALREADY_EXISTS');
       }
       const now = new Date().toISOString();
@@ -116,6 +129,9 @@ export function createBrowserDemoApi() {
         id: nextId(users, 'US'),
         username: normalized.data.username,
         password: normalized.data.password,
+        name: normalized.data.name,
+        department: normalized.data.department,
+        permissions: normalized.data.permissions,
         isActive: true,
         createdAt: now,
         updatedAt: now
@@ -124,21 +140,27 @@ export function createBrowserDemoApi() {
       return ok(withoutPrivateFields(user));
     },
     updateUser: async (id, input) => {
-      const users = readList(STORAGE_KEYS.users);
+      const users = readList(STORAGE_KEYS.users).map(normalizeStoredUser);
       const existing = users.find((user) => user.id === id);
       if (!existing) return fail('This user could not be found.', 'USER_NOT_FOUND');
       const normalized = normalizeUserInput({
         username: input?.username ?? existing.username,
-        password: input?.password ?? existing.password
+        password: input?.password ?? existing.password,
+        name: input?.name ?? existing.name,
+        department: input?.department ?? existing.department,
+        permissions: input?.permissions ?? existing.permissions
       });
       if (!normalized.ok) return normalized;
-      if (users.some((user) => user.id !== id && normalizeName(user.username) === normalizeName(normalized.data.username))) {
+      if (users.some((user) => user.id !== id && user.username === normalized.data.username)) {
         return fail('user already exists.', 'USER_ALREADY_EXISTS');
       }
       const updated = {
         ...existing,
         username: normalized.data.username,
         password: normalized.data.password,
+        name: normalized.data.name,
+        department: normalized.data.department,
+        permissions: normalized.data.permissions,
         isActive: typeof input?.isActive === 'boolean' ? input.isActive : existing.isActive,
         updatedAt: new Date().toISOString()
       };
@@ -146,9 +168,9 @@ export function createBrowserDemoApi() {
       return ok(withoutPrivateFields(updated));
     },
     authenticateUser: async (input) => {
-      const username = normalizeName(input?.username);
+      const username = normalizeUsername(input?.username);
       const password = String(input?.password ?? '');
-      const user = readList(STORAGE_KEYS.users).find((item) => normalizeName(item.username) === username && item.password === password);
+      const user = readList(STORAGE_KEYS.users).map(normalizeStoredUser).find((item) => item.username === username && item.password === password);
       if (!user) return fail('Username or password is incorrect.', 'LOGIN_INVALID');
       if (!user.isActive) return fail('This user no longer has access.', 'USER_INACTIVE');
       return ok(withoutPrivateFields(user));
@@ -187,9 +209,14 @@ function calculateProductDraft(input, materials) {
   const rows = (input.ingredients ?? []).filter((row) => row.rawMaterialId || row.quantity || row.unit);
   if (rows.length === 0) return fail('Add at least one ingredient.');
   const ingredients = [];
+  const seen = new Set();
   for (const row of rows) {
     const material = materials.find((item) => item.id === row.rawMaterialId);
     if (!material) return fail('Choose a raw material for this ingredient row.');
+    if (seen.has(row.rawMaterialId)) {
+      return fail('Use each raw material only once in a product.', 'INGREDIENT_DUPLICATE_RAW_MATERIAL');
+    }
+    seen.add(row.rawMaterialId);
     const quantity = Number(row.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) return fail('Enter an ingredient quantity greater than zero.');
     const convertedQuantity = convert(quantity, row.unit, material.baseUnit, material.customConversions ?? {});
@@ -219,10 +246,29 @@ function convert(quantity, from, to, conversions) {
   if (from === 'g' && to === 'kg') return quantity / 1000;
   if (from === 'L' && to === 'ml') return quantity * 1000;
   if (from === 'ml' && to === 'L') return quantity / 1000;
+  const density = inferGramsPerMl(conversions);
+  if (density && ['L', 'ml'].includes(from) && ['kg', 'g'].includes(to)) {
+    const grams = (from === 'L' ? quantity * 1000 : quantity) * density;
+    return to === 'kg' ? grams / 1000 : grams;
+  }
+  if (density && ['kg', 'g'].includes(from) && ['L', 'ml'].includes(to)) {
+    const milliliters = (from === 'kg' ? quantity * 1000 : quantity) / density;
+    return to === 'L' ? milliliters / 1000 : milliliters;
+  }
   if (['cup', 'tbsp', 'tsp'].includes(from)) {
     const conversion = conversions[from];
     if (!conversion) return null;
     return convert(quantity * Number(conversion.quantity), conversion.unit, to, conversions);
+  }
+  return null;
+}
+
+function inferGramsPerMl(conversions = {}) {
+  for (const unit of ['cup', 'tbsp', 'tsp']) {
+    const conversion = conversions[unit];
+    if (!conversion || !['kg', 'g'].includes(conversion.unit) || !(Number(conversion.quantity) > 0)) continue;
+    const grams = conversion.unit === 'kg' ? Number(conversion.quantity) * 1000 : Number(conversion.quantity);
+    return grams / metricSpoonsMl[unit];
   }
   return null;
 }
@@ -248,11 +294,36 @@ function readJson(key, fallback) {
 }
 
 function normalizeUserInput(input) {
-  const username = String(input?.username ?? '').trim();
+  const username = normalizeUsername(input?.username);
   const password = String(input?.password ?? '');
+  const name = String(input?.name ?? '').trim();
+  const department = String(input?.department ?? '').trim();
+  const permissions = normalizePermissions(input?.permissions);
   if (!username) return fail('Enter a username.', 'USERNAME_REQUIRED');
   if (!password) return fail('Enter a password.', 'PASSWORD_REQUIRED');
-  return ok({ username, password });
+  return ok({ username, password, name, department, permissions });
+}
+
+function normalizeUsername(value) {
+  return String(value ?? '').trim().replace(/\s+/g, '_');
+}
+
+function normalizeStoredUser(user) {
+  return {
+    ...user,
+    name: String(user?.name ?? '').trim(),
+    department: String(user?.department ?? '').trim(),
+    permissions: normalizePermissions(user?.permissions)
+  };
+}
+
+function normalizePermissions(input) {
+  return Object.fromEntries(Object.entries(sectionPermissions).map(([section, defaults]) => {
+    const current = input?.[section] ?? {};
+    const visible = typeof current.visible === 'boolean' ? current.visible : defaults.visible;
+    const edit = visible && defaults.edit && (typeof current.edit === 'boolean' ? current.edit : defaults.edit);
+    return [section, { visible, edit }];
+  }));
 }
 
 function normalizeName(value) {

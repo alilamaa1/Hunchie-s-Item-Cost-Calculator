@@ -80,7 +80,7 @@ export async function backupJsonFile(filePath, backupsFolder, options = {}) {
     const current = await readJsonFile(filePath);
     if (!current.ok) return current;
     const content = `${JSON.stringify(current.data, null, 2)}\n`;
-    const backupPath = `${toDirectBlobPath(backupsFolder)}/${createBackupFileName(filePath, options.now ?? new Date())}`;
+    const backupPath = `${toDirectBlobPath(backupsFolder)}/${createUniqueBackupFileName(filePath, options.now ?? new Date())}`;
     await put(backupPath, content, {
       access: 'private',
       allowOverwrite: false,
@@ -94,6 +94,12 @@ export async function backupJsonFile(filePath, backupsFolder, options = {}) {
       cause: error instanceof Error ? error.message : String(error)
     });
   }
+}
+
+export function createUniqueBackupFileName(filePath, date) {
+  const name = createBackupFileName(filePath, date);
+  const unique = `${date.getTime()}-${Math.random().toString(36).slice(2, 10)}`;
+  return name.replace(/\.json$/i, `_${unique}.json`);
 }
 
 async function latestVersionPath(filePath) {

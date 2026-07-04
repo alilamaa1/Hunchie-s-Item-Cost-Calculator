@@ -563,6 +563,22 @@ button {
   background: var(--danger);
 }
 
+.danger-button.subtle {
+  color: #8a2f27;
+  background: #f2e6e2;
+  box-shadow: none;
+}
+
+.danger-button.subtle:hover {
+  color: #701f18;
+  background: #ead8d3;
+}
+
+.small-button {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
 .danger-text {
   color: var(--danger);
 }

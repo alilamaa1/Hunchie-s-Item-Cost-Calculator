@@ -688,13 +688,11 @@ function UserRow({ user, onSave, onDelete, departmentOptions, onAddDepartment })
           <div className="button-row">
             <button type="button" className="primary-button" disabled={saving} onClick={save}><Save size={17} />{saving ? 'Saving...' : 'Save'}</button>
             <button type="button" className="secondary-button" onClick={() => setEditing(false)}>Cancel</button>
+            <button type="button" className="danger-button subtle small-button" onClick={() => setConfirmingDelete(true)}><Trash2 size={15} />Delete</button>
           </div>
         </div>
       ) : (
-        <div className="button-row">
-          <button type="button" className="secondary-button fit-button" onClick={() => setEditing(true)}><Pencil size={16} />Edit User</button>
-          <button type="button" className="danger-button fit-button" onClick={() => setConfirmingDelete(true)}><Trash2 size={16} />Delete User</button>
-        </div>
+        <button type="button" className="secondary-button fit-button" onClick={() => setEditing(true)}><Pencil size={16} />Edit User</button>
       )}
     </div>
   );

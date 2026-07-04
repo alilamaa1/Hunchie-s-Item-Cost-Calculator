@@ -410,6 +410,7 @@ function AdminApp() {
       setError(result.error?.message ?? 'Admin key is incorrect.');
       return;
     }
+    api.setAdminKey?.(pin);
     setAuthorized(true);
     await loadUsers();
   }
@@ -418,7 +419,9 @@ function AdminApp() {
     event.preventDefault();
     setError('');
     setNotice('');
+    setLoading(true);
     const result = await api.createUser(form);
+    setLoading(false);
     if (!result.ok) {
       setError(result.error?.message ?? 'Could not create user.');
       return;
@@ -433,7 +436,9 @@ function AdminApp() {
   async function saveUser(id, input) {
     setError('');
     setNotice('');
+    setLoading(true);
     const result = await api.updateUser(id, input);
+    setLoading(false);
     if (!result.ok) {
       setError(result.error?.message ?? 'Could not update user.');
       return false;
@@ -503,9 +508,9 @@ function AdminApp() {
             onAddOption={saveDepartmentOption}
           />
           <PermissionEditor permissions={form.permissions} onChange={(permissions) => setForm({ ...form, permissions })} />
-          <button className="primary-button full">
+          <button className="primary-button full" disabled={loading}>
             <UserPlus size={18} />
-            Add User
+            {loading ? 'Saving...' : 'Add User'}
           </button>
         </form>
         <section className="info-panel">

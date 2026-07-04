@@ -22,12 +22,19 @@ const apiMethods = [
 ];
 
 const ADMIN_KEY_SESSION_KEY = 'item_cost_admin_key';
+let activeAdminKey = safeReadAdminKey();
 
 export function createWebApi() {
-  return Object.fromEntries(apiMethods.map((method) => [
+  return {
+    ...Object.fromEntries(apiMethods.map((method) => [
     method,
     (...args) => callApi(method, args)
-  ]));
+    ])),
+    setAdminKey: (value) => {
+      activeAdminKey = String(value ?? '');
+      safeWriteAdminKey(activeAdminKey);
+    }
+  };
 }
 
 export function shouldUseWebApi() {
@@ -41,7 +48,7 @@ async function callApi(method, args) {
     const payload = {
       method,
       args,
-      adminKey: sessionStorage.getItem(ADMIN_KEY_SESSION_KEY) ?? ''
+      adminKey: activeAdminKey
     };
     const response = await fetch('/api/app', {
       method: 'POST',
@@ -50,7 +57,8 @@ async function callApi(method, args) {
     });
     const result = await response.json();
     if (method === 'verifyAdminKey' && result?.ok) {
-      sessionStorage.setItem(ADMIN_KEY_SESSION_KEY, String(args[0] ?? ''));
+      activeAdminKey = String(args[0] ?? '');
+      safeWriteAdminKey(activeAdminKey);
     }
     if (!response.ok && result?.ok !== false) {
       return { ok: false, error: { message: 'Server request failed.' } };
@@ -63,5 +71,21 @@ async function callApi(method, args) {
         message: error instanceof Error ? error.message : 'Server request failed.'
       }
     };
+  }
+}
+
+function safeReadAdminKey() {
+  try {
+    return sessionStorage.getItem(ADMIN_KEY_SESSION_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function safeWriteAdminKey(value) {
+  try {
+    sessionStorage.setItem(ADMIN_KEY_SESSION_KEY, value);
+  } catch {
+    // Some browser privacy modes block storage. The in-memory key still works for the current page.
   }
 }

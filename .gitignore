@@ -15,3 +15,6 @@ pnpm-debug.log*
 Desktop/
 Item Cost Calculator/
 backups/
+
+.vercel
+.env.local

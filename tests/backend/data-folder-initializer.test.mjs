@@ -126,6 +126,7 @@ test('missing settings.json contains default exchange rate', async () => {
 
     assert.equal(result.ok, true);
     assert.equal(settings.currency.usdToLbp, DEFAULT_USD_TO_LBP);
+    assert.equal(settings.formulas.totalCostMultiplier, 2.5);
     assert.equal(settings.dataFolder, dataFolder);
   } finally {
     await removeTempAppDataFolder(parent);

@@ -21,6 +21,7 @@ import {
 import { loadSettings, updateSettings } from './settingsService.mjs';
 import {
   authenticateUser,
+  changePassword,
   createUser,
   deleteUser,
   listUsers,
@@ -52,11 +53,19 @@ export function createAppServices() {
     createUser,
     deleteUser,
     updateUser,
+    changePassword,
     authenticateUser,
     calculateProductDraft: async (input, context) => {
-      const materials = await listRawMaterials(context);
+      const [materials, settings] = await Promise.all([
+        listRawMaterials(context),
+        loadSettings(context)
+      ]);
       if (!materials.ok) return materials;
-      return calculateProductDraft(input, materials.data, context);
+      if (!settings.ok) return settings;
+      return calculateProductDraft(input, materials.data, {
+        exchangeRate: settings.data.currency.usdToLbp,
+        totalCostMultiplier: settings.data.formulas.totalCostMultiplier
+      });
     }
   };
 }

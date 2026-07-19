@@ -63,7 +63,8 @@ test('happy path initializes, adds flour sugar eggs, creates cake, reloads from 
 
     assert.equal(cake.ok, true);
     assert.ok(cake.data.ingredients.every((ingredient) => ingredient.portionCostUSD > 0 && ingredient.portionCostLBP > 0));
-    assert.equal(cake.data.totalCostUSD, cake.data.ingredients.reduce((sum, ingredient) => sum + ingredient.portionCostUSD, 0));
+    assert.equal(cake.data.ingredientCostUSD, cake.data.ingredients.reduce((sum, ingredient) => sum + ingredient.portionCostUSD, 0));
+    assert.equal(cake.data.totalCostUSD, cake.data.ingredientCostUSD * 2.5);
 
     const productsAfterReopen = await listProducts({ dataFolder });
     const detailAfterReopen = await getProductById(productsAfterReopen.data[0].id, { dataFolder });
@@ -97,4 +98,3 @@ test('break scenarios fail clearly and do not overwrite data unexpectedly', asyn
     await removeTempAppDataFolder(parent);
   }
 });
-

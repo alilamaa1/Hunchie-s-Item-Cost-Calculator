@@ -7,6 +7,7 @@ const STORAGE_KEYS = {
 
 const defaultSettings = {
   currency: { usdToLbp: 90000 },
+  formulas: { totalCostMultiplier: 2.5 },
   dataFolder: 'Desktop/Item Cost Calculator',
   appVersion: '1.0.0'
 };
@@ -64,7 +65,10 @@ export function createBrowserDemoApi() {
       return ok({ deletedId: id });
     },
     calculateRawMaterialDraft: async (input) => calculateRawMaterialDraft(input),
-    listProducts: async () => ok(readList(STORAGE_KEYS.products).map((product) => ({ ...product, ingredientCount: product.ingredients.length }))),
+    listProducts: async () => {
+      const settings = readJson(STORAGE_KEYS.settings, defaultSettings);
+      return ok(readList(STORAGE_KEYS.products).map((product) => ({ ...applyProductFormula(product, settings.formulas?.totalCostMultiplier), ingredientCount: product.ingredients.length })));
+    },
     createProduct: async (input) => {
       const products = readList(STORAGE_KEYS.products);
       const draft = calculateProductDraft(input, readList(STORAGE_KEYS.materials));
@@ -88,8 +92,9 @@ export function createBrowserDemoApi() {
       const product = readList(STORAGE_KEYS.products).find((item) => item.id === id);
       if (!product) return fail('Product not found.');
       const materials = readList(STORAGE_KEYS.materials);
+      const settings = readJson(STORAGE_KEYS.settings, defaultSettings);
       return ok({
-        ...product,
+        ...applyProductFormula(product, settings.formulas?.totalCostMultiplier),
         ingredients: product.ingredients.map((ingredient) => ({
           ...ingredient,
           rawMaterialName: materials.find((material) => material.id === ingredient.rawMaterialId)?.name ?? null,
@@ -102,13 +107,14 @@ export function createBrowserDemoApi() {
       writeList(STORAGE_KEYS.products, readList(STORAGE_KEYS.products).filter((item) => item.id !== id));
       return ok({ deletedId: id });
     },
-    calculateProductDraft: async (input) => calculateProductDraft(input, readList(STORAGE_KEYS.materials)),
+    calculateProductDraft: async (input) => calculateProductDraft(input, readList(STORAGE_KEYS.materials), readJson(STORAGE_KEYS.settings, defaultSettings)),
     loadSettings: async () => ok(readJson(STORAGE_KEYS.settings, defaultSettings)),
     updateSettings: async (input) => {
       const settings = {
         ...defaultSettings,
         ...readJson(STORAGE_KEYS.settings, defaultSettings),
-        currency: { usdToLbp: Number(input?.currency?.usdToLbp ?? 90000) }
+        currency: { usdToLbp: Number(input?.currency?.usdToLbp ?? 90000) },
+        formulas: { totalCostMultiplier: Number(input?.formulas?.totalCostMultiplier ?? readJson(STORAGE_KEYS.settings, defaultSettings).formulas?.totalCostMultiplier ?? 2.5) }
       };
       localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
       return ok({ settings, warnings: [{ message: 'Browser preview settings saved locally.' }] });
@@ -173,6 +179,17 @@ export function createBrowserDemoApi() {
       writeList(STORAGE_KEYS.users, users.filter((user) => user.id !== id));
       return ok({ deletedId: id });
     },
+    changePassword: async (id, input) => {
+      const users = readList(STORAGE_KEYS.users).map(normalizeStoredUser);
+      const existing = users.find((user) => user.id === id);
+      if (!existing) return fail('This user could not be found.', 'USER_NOT_FOUND');
+      if (existing.password !== String(input?.oldPassword ?? '')) return fail('Username or password is incorrect.', 'LOGIN_INVALID');
+      const newPassword = String(input?.newPassword ?? '');
+      if (!newPassword) return fail('Enter a password.', 'PASSWORD_REQUIRED');
+      const updated = { ...existing, password: newPassword, updatedAt: new Date().toISOString() };
+      writeList(STORAGE_KEYS.users, users.map((user) => user.id === id ? updated : user));
+      return ok(withoutPrivateFields(updated));
+    },
     authenticateUser: async (input) => {
       const username = normalizeUsername(input?.username);
       const password = String(input?.password ?? '');
@@ -209,7 +226,7 @@ function calculateRawMaterialDraft(input) {
   });
 }
 
-function calculateProductDraft(input, materials) {
+function calculateProductDraft(input, materials, settings = defaultSettings) {
   const name = String(input?.name ?? '').trim();
   if (!name) return fail('Enter a product name.');
   const rows = (input.ingredients ?? []).filter((row) => row.rawMaterialId || row.quantity || row.unit);
@@ -238,12 +255,35 @@ function calculateProductDraft(input, materials) {
       portionCostLBP: round(portionCostUSD * 90000)
     });
   }
+  const ingredientCostUSD = round(ingredients.reduce((sum, item) => sum + item.portionCostUSD, 0));
+  const ingredientCostLBP = round(ingredients.reduce((sum, item) => sum + item.portionCostLBP, 0));
+  const totalCostMultiplier = resolveTotalCostMultiplier(settings.formulas?.totalCostMultiplier);
   return ok({
     name,
     ingredients,
-    totalCostUSD: round(ingredients.reduce((sum, item) => sum + item.portionCostUSD, 0)),
-    totalCostLBP: round(ingredients.reduce((sum, item) => sum + item.portionCostLBP, 0))
+    ingredientCostUSD,
+    ingredientCostLBP,
+    totalCostUSD: round(ingredientCostUSD * totalCostMultiplier),
+    totalCostLBP: round(ingredientCostLBP * totalCostMultiplier)
   });
+}
+
+function applyProductFormula(product, multiplier = 2.5) {
+  const ingredientCostUSD = round((product.ingredients ?? []).reduce((sum, item) => sum + Number(item.portionCostUSD ?? 0), 0));
+  const ingredientCostLBP = round((product.ingredients ?? []).reduce((sum, item) => sum + Number(item.portionCostLBP ?? 0), 0));
+  const totalCostMultiplier = resolveTotalCostMultiplier(multiplier);
+  return {
+    ...product,
+    ingredientCostUSD,
+    ingredientCostLBP,
+    totalCostUSD: round(ingredientCostUSD * totalCostMultiplier),
+    totalCostLBP: round(ingredientCostLBP * totalCostMultiplier)
+  };
+}
+
+function resolveTotalCostMultiplier(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 2.5;
 }
 
 function convert(quantity, from, to, conversions) {

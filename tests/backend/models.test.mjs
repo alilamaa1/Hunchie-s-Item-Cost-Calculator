@@ -44,8 +44,10 @@ function validProduct(overrides = {}) {
         portionCostLBP: 17280
       }
     ],
-    totalCostUSD: 0.192,
-    totalCostLBP: 17280,
+    ingredientCostUSD: 0.192,
+    ingredientCostLBP: 17280,
+    totalCostUSD: 0.48,
+    totalCostLBP: 43200,
     createdAt: now,
     updatedAt: now,
     ...overrides
@@ -196,6 +198,13 @@ test('saved product includes numeric total costs', () => {
   assert.equal(result.error.code, ErrorCodes.PRODUCT_INGREDIENTS_REQUIRED);
 });
 
+test('saved product includes numeric ingredient costs', () => {
+  const result = validateSavedProduct(validProduct({ ingredientCostUSD: undefined }));
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, ErrorCodes.PRODUCT_INGREDIENTS_REQUIRED);
+});
+
 test('product invalid timestamp fails validation', () => {
   const result = validateSavedProduct(validProduct({ updatedAt: 'invalid' }));
 
@@ -237,5 +246,5 @@ test('default settings include usdToLbp 90000', () => {
   const settings = createDefaultSettings({ dataFolder: 'Desktop/Item Cost Calculator' });
 
   assert.equal(settings.currency.usdToLbp, DEFAULT_USD_TO_LBP);
+  assert.equal(settings.formulas.totalCostMultiplier, 2.5);
 });
-

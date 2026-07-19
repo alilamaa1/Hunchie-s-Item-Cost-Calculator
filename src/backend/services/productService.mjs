@@ -3,11 +3,13 @@ import { ErrorCodes } from '../../shared/errors.mjs';
 import { failureFromCode, success } from '../../shared/result.mjs';
 import { generateNextProductId } from '../domain/idGenerator.mjs';
 import { validateSavedProduct } from '../domain/productModel.mjs';
+import { DEFAULT_TOTAL_COST_MULTIPLIER } from '../domain/settingsModel.mjs';
 import { convertQuantity, getCompatibleUnits } from '../domain/unitConversionEngine.mjs';
 import { isPositiveNumber } from '../domain/validators.mjs';
 import { getAppFilePaths } from '../storage/appFiles.mjs';
 import { backupJsonFile, readJsonFile, writeJsonFile } from '../storage/jsonStorage.mjs';
 import { loadRawMaterials } from './rawMaterialService.mjs';
+import { loadSettings } from './settingsService.mjs';
 
 const defaultStorage = Object.freeze({
   backupJsonFile,
@@ -63,6 +65,7 @@ export function calculateIngredientPortion(material, ingredient, exchangeRate = 
 
 export function calculateProductDraft(input, rawMaterials, options = {}) {
   const exchangeRate = options.exchangeRate ?? DEFAULT_USD_TO_LBP;
+  const totalCostMultiplier = resolveTotalCostMultiplier(options);
   const cleaned = cleanupProductInput(input);
 
   if (!cleaned.name) {
@@ -113,12 +116,16 @@ export function calculateProductDraft(input, rawMaterials, options = {}) {
     calculatedIngredients.push(calculated.data);
   }
 
-  const totalCostUSD = roundCalculation(calculatedIngredients.reduce((sum, ingredient) => sum + ingredient.portionCostUSD, 0));
-  const totalCostLBP = roundCalculation(calculatedIngredients.reduce((sum, ingredient) => sum + ingredient.portionCostLBP, 0));
+  const ingredientCostUSD = roundCalculation(calculatedIngredients.reduce((sum, ingredient) => sum + ingredient.portionCostUSD, 0));
+  const ingredientCostLBP = roundCalculation(calculatedIngredients.reduce((sum, ingredient) => sum + ingredient.portionCostLBP, 0));
+  const totalCostUSD = roundCalculation(ingredientCostUSD * totalCostMultiplier);
+  const totalCostLBP = roundCalculation(ingredientCostLBP * totalCostMultiplier);
 
   return success({
     name: cleaned.name,
     ingredients: calculatedIngredients,
+    ingredientCostUSD,
+    ingredientCostLBP,
     totalCostUSD,
     totalCostLBP
   });
@@ -128,14 +135,16 @@ export async function createProduct(input, options) {
   const context = requireDataFolder(options);
   if (!context.ok) return context;
 
-  const [productsResult, materialsResult] = await Promise.all([
+  const [productsResult, materialsResult, settingsResult] = await Promise.all([
     loadProducts(context.data),
-    loadRawMaterials(context.data)
+    loadRawMaterials(context.data),
+    loadSettings(context.data)
   ]);
   if (!productsResult.ok) return productsResult;
   if (!materialsResult.ok) return materialsResult;
+  if (!settingsResult.ok) return settingsResult;
 
-  const draft = calculateProductDraft(input, materialsResult.data, context.data);
+  const draft = calculateProductDraft(input, materialsResult.data, calculationOptionsFromSettings(settingsResult.data));
   if (!draft.ok) return draft;
 
   const now = getNow(context.data);
@@ -159,19 +168,21 @@ export async function updateProduct(id, input, options) {
   const context = requireDataFolder(options);
   if (!context.ok) return context;
 
-  const [productsResult, materialsResult] = await Promise.all([
+  const [productsResult, materialsResult, settingsResult] = await Promise.all([
     loadProducts(context.data),
-    loadRawMaterials(context.data)
+    loadRawMaterials(context.data),
+    loadSettings(context.data)
   ]);
   if (!productsResult.ok) return productsResult;
   if (!materialsResult.ok) return materialsResult;
+  if (!settingsResult.ok) return settingsResult;
 
   const existing = productsResult.data.find((product) => product.id === id);
   if (!existing) {
     return failureFromCode(ErrorCodes.PRODUCT_NOT_FOUND);
   }
 
-  const draft = calculateProductDraft(input, materialsResult.data, context.data);
+  const draft = calculateProductDraft(input, materialsResult.data, calculationOptionsFromSettings(settingsResult.data));
   if (!draft.ok) return draft;
 
   const updated = {
@@ -200,9 +211,11 @@ export async function listProducts(options) {
 
   const products = await loadProducts(context.data);
   if (!products.ok) return products;
+  const settings = await loadSettings(context.data);
+  if (!settings.ok) return settings;
 
   return success(sortProducts(products.data).map((product) => ({
-    ...product,
+    ...applyProductFormula(product, settings.data.formulas.totalCostMultiplier),
     ingredientCount: product.ingredients.length
   })));
 }
@@ -211,19 +224,21 @@ export async function getProductById(id, options) {
   const context = requireDataFolder(options);
   if (!context.ok) return context;
 
-  const [productsResult, materialsResult] = await Promise.all([
+  const [productsResult, materialsResult, settingsResult] = await Promise.all([
     loadProducts(context.data),
-    loadRawMaterials(context.data)
+    loadRawMaterials(context.data),
+    loadSettings(context.data)
   ]);
   if (!productsResult.ok) return productsResult;
   if (!materialsResult.ok) return materialsResult;
+  if (!settingsResult.ok) return settingsResult;
 
   const product = productsResult.data.find((item) => item.id === id);
   if (!product) {
     return failureFromCode(ErrorCodes.PRODUCT_NOT_FOUND);
   }
 
-  return success(resolveProductDetail(product, materialsResult.data));
+  return success(resolveProductDetail(applyProductFormula(product, settingsResult.data.formulas.totalCostMultiplier), materialsResult.data));
 }
 
 export async function searchProducts(query, options) {
@@ -360,6 +375,31 @@ function normalizeQuantityValue(value) {
 
 function sortProducts(products) {
   return [...products].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
+function applyProductFormula(product, totalCostMultiplier = DEFAULT_TOTAL_COST_MULTIPLIER) {
+  const ingredientCostUSD = roundCalculation(product.ingredients.reduce((sum, ingredient) => sum + Number(ingredient.portionCostUSD ?? 0), 0));
+  const ingredientCostLBP = roundCalculation(product.ingredients.reduce((sum, ingredient) => sum + Number(ingredient.portionCostLBP ?? 0), 0));
+
+  return {
+    ...product,
+    ingredientCostUSD,
+    ingredientCostLBP,
+    totalCostUSD: roundCalculation(ingredientCostUSD * resolveTotalCostMultiplier({ totalCostMultiplier })),
+    totalCostLBP: roundCalculation(ingredientCostLBP * resolveTotalCostMultiplier({ totalCostMultiplier }))
+  };
+}
+
+function calculationOptionsFromSettings(settings) {
+  return {
+    exchangeRate: settings.currency.usdToLbp,
+    totalCostMultiplier: settings.formulas.totalCostMultiplier
+  };
+}
+
+function resolveTotalCostMultiplier(options = {}) {
+  const value = Number(options.totalCostMultiplier ?? options.formulas?.totalCostMultiplier ?? DEFAULT_TOTAL_COST_MULTIPLIER);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_TOTAL_COST_MULTIPLIER;
 }
 
 function getNow(context) {

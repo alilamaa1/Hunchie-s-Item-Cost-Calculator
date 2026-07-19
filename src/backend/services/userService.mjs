@@ -123,6 +123,38 @@ export async function deleteUser(id, options = {}) {
   return success({ deletedId: id });
 }
 
+export async function changePassword(id, input, options = {}) {
+  const context = requireDataFolder(options);
+  if (!context.ok) return context;
+
+  const usersResult = await loadUsers(context.data);
+  if (!usersResult.ok) return usersResult;
+
+  const existing = usersResult.data.find((user) => user.id === id);
+  if (!existing) {
+    return failureFromCode(ErrorCodes.USER_NOT_FOUND);
+  }
+
+  if (existing.password !== String(input?.oldPassword ?? '')) {
+    return failureFromCode(ErrorCodes.LOGIN_INVALID);
+  }
+
+  const newPassword = String(input?.newPassword ?? '');
+  if (!newPassword) {
+    return failureFromCode(ErrorCodes.PASSWORD_REQUIRED);
+  }
+
+  const updated = {
+    ...existing,
+    password: newPassword,
+    updatedAt: getNow(context.data)
+  };
+
+  const save = await saveUsers(usersResult.data.map((user) => user.id === id ? updated : user), context.data, { backup: true });
+  if (!save.ok) return save;
+  return success(withoutPrivateFields(updated));
+}
+
 export async function authenticateUser(input, options = {}) {
   const context = requireDataFolder(options);
   if (!context.ok) return context;

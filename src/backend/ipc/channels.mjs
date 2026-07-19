@@ -19,5 +19,6 @@ export const IpcChannels = Object.freeze({
   USER_CREATE: 'user:create',
   USER_UPDATE: 'user:update',
   USER_DELETE: 'user:delete',
+  USER_PASSWORD_CHANGE: 'user:password-change',
   USER_AUTHENTICATE: 'user:authenticate'
 });

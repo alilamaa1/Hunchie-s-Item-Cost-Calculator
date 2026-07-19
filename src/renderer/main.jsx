@@ -36,6 +36,8 @@ const CANONICAL_WEB_HOST = 'item-cost-calculator.vercel.app';
 const USER_SESSION_KEY = 'item_cost_current_user';
 const USER_ACCESS_SYNC_KEY = 'item_cost_users_updated_at';
 const USER_ACCESS_CHANNEL = 'item-cost-user-access';
+const SETTINGS_SYNC_KEY = 'item_cost_settings_updated_at';
+const SETTINGS_CHANNEL = 'item-cost-settings';
 const DEPARTMENT_OPTIONS_KEY = 'item_cost_department_options';
 
 const sectionConfig = [
@@ -133,6 +135,8 @@ function MainApp() {
   const [currentUser, setCurrentUser] = useState(() => readSessionUser());
   const [activeView, setActiveView] = useState({ name: 'home' });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [productSearchScope, setProductSearchScope] = useState('all');
   const [materials, setMaterials] = useState([]);
@@ -207,19 +211,27 @@ function MainApp() {
 
     function handleStorage(event) {
       if (event.key === USER_ACCESS_SYNC_KEY) syncCurrentUser();
+      if (event.key === SETTINGS_SYNC_KEY) refreshAll();
     }
 
     const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel(USER_ACCESS_CHANNEL) : null;
+    const settingsChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel(SETTINGS_CHANNEL) : null;
     if (channel) {
       channel.onmessage = syncCurrentUser;
+    }
+    if (settingsChannel) {
+      settingsChannel.onmessage = refreshAll;
     }
 
     window.addEventListener('storage', handleStorage);
     window.addEventListener('item-cost-users-updated', syncCurrentUser);
+    window.addEventListener('item-cost-settings-updated', refreshAll);
     return () => {
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('item-cost-users-updated', syncCurrentUser);
+      window.removeEventListener('item-cost-settings-updated', refreshAll);
       channel?.close();
+      settingsChannel?.close();
     };
   }, [currentUser]);
 
@@ -246,6 +258,12 @@ function MainApp() {
     setProducts([]);
     setSettings(null);
     setActiveView({ name: 'home' });
+  }
+
+  function handleUserChanged(user) {
+    const sessionUser = withoutUserPassword(user);
+    sessionStorage.setItem(USER_SESSION_KEY, JSON.stringify(sessionUser));
+    setCurrentUser(sessionUser);
   }
 
   const title = useMemo(() => {
@@ -288,11 +306,13 @@ function MainApp() {
   };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${sidebarCollapsed ? 'is-sidebar-collapsed' : ''}`}>
       <Sidebar
         activeView={activeView.name}
         canView={canView}
         canEdit={canEdit}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed((current) => !current)}
         onNavigate={(name) => {
           setActiveView({ name });
           setSearchQuery('');
@@ -321,6 +341,7 @@ function MainApp() {
           settings={settings}
           currentUser={currentUser}
           canView={canView}
+          onChangePassword={() => setPasswordDialogOpen(true)}
           onLogout={handleLogout}
         />
 
@@ -329,6 +350,13 @@ function MainApp() {
           {loading ? <Loading /> : <ViewRouter context={appContext} />}
         </main>
       </div>
+      {passwordDialogOpen && (
+        <ChangePasswordDialog
+          user={currentUser}
+          onChanged={handleUserChanged}
+          onClose={() => setPasswordDialogOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -378,11 +406,57 @@ function LoginView({ onLogin }) {
   );
 }
 
+function ChangePasswordDialog({ user, onChanged, onClose }) {
+  const [form, setForm] = useState({ oldPassword: '', newPassword: '' });
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setError('');
+    if (!form.newPassword) {
+      setError('Enter a new password.');
+      return;
+    }
+    setSaving(true);
+    const result = await api.changePassword(user.id, form);
+    setSaving(false);
+    if (!result.ok) {
+      setForm({ oldPassword: '', newPassword: '' });
+      setError(result.error?.code === 'LOGIN_INVALID' ? 'Old password is incorrect.' : result.error?.message ?? 'Could not change password.');
+      return;
+    }
+    onChanged(result.data);
+    onClose();
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <form className="modal-panel" onSubmit={submit}>
+        <div>
+          <h3>Change password</h3>
+          <p>Enter your old password before setting a new one.</p>
+        </div>
+        {error && <Notice type="error" message={error} onClose={() => setError('')} />}
+        <PasswordField label="Old Password" value={form.oldPassword} onChange={(value) => setForm({ ...form, oldPassword: value })} />
+        <PasswordField label="New Password" value={form.newPassword} onChange={(value) => setForm({ ...form, newPassword: value })} />
+        <div className="button-row">
+          <button type="submit" className="primary-button" disabled={saving}><KeyRound size={17} />{saving ? 'Saving...' : 'Save Password'}</button>
+          <button type="button" className="secondary-button" disabled={saving} onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function AdminApp() {
   const [authorized, setAuthorized] = useState(false);
+  const [adminSection, setAdminSection] = useState('users');
   const [pin, setPin] = useState('');
   const [users, setUsers] = useState([]);
   const [form, setForm] = useState(() => createEmptyUserForm());
+  const [adminSettings, setAdminSettings] = useState(null);
+  const [formulaMultiplier, setFormulaMultiplier] = useState(2.5);
   const [userSearch, setUserSearch] = useState('');
   const [departmentOptions, setDepartmentOptions] = useState(() => readDepartmentOptions());
   const [error, setError] = useState('');
@@ -405,6 +479,20 @@ function AdminApp() {
     writeDepartmentOptions(mergedOptions);
   }
 
+  async function loadAdminSettings() {
+    const result = await api.loadSettings();
+    if (!result.ok) {
+      setError(result.error?.message ?? 'Could not load formulas.');
+      return;
+    }
+    setAdminSettings(result.data);
+    setFormulaMultiplier(result.data.formulas?.totalCostMultiplier ?? 2.5);
+  }
+
+  async function refreshAdminData() {
+    await Promise.all([loadUsers(), loadAdminSettings()]);
+  }
+
   async function submitPin(event) {
     event.preventDefault();
     setError('');
@@ -423,7 +511,7 @@ function AdminApp() {
     }
     api.setAdminKey?.(pin);
     setAuthorized(true);
-    await loadUsers();
+    await refreshAdminData();
   }
 
   async function createUser(event) {
@@ -489,6 +577,24 @@ function AdminApp() {
     return true;
   }
 
+  async function saveFormulaMultiplier() {
+    const multiplier = Number(formulaMultiplier);
+    if (!Number.isFinite(multiplier) || multiplier <= 0) {
+      setError('Enter a multiplier greater than zero.');
+      return false;
+    }
+    const result = await api.updateSettings({ formulas: { totalCostMultiplier: multiplier } });
+    if (!result.ok) {
+      setError(result.error?.message ?? 'Could not save formula.');
+      return false;
+    }
+    setAdminSettings(result.data.settings);
+    setFormulaMultiplier(result.data.settings.formulas.totalCostMultiplier);
+    setNotice('Formula saved. Product totals now use the updated multiplier.');
+    broadcastSettingsUpdate();
+    return true;
+  }
+
   function logoutAdmin() {
     api.setAdminKey?.('');
     setAuthorized(false);
@@ -507,7 +613,7 @@ function AdminApp() {
 
   const filteredUsers = filterUsers(users, userSearch);
 
-  usePullToRefresh(authorized, loadUsers);
+  usePullToRefresh(authorized, refreshAdminData);
 
   if (!authorized) {
     return (
@@ -539,7 +645,7 @@ function AdminApp() {
           <p>Create users and decide who can still access the Item Cost Calculator.</p>
         </div>
         <div className="button-row">
-          <button className="secondary-button" type="button" onClick={loadUsers} disabled={usersRefreshing}>
+          <button className="secondary-button" type="button" onClick={refreshAdminData} disabled={usersRefreshing}>
             <RefreshCw size={16} />{usersRefreshing ? 'Refreshing...' : 'Refresh'}
           </button>
           <button className="secondary-button" type="button" onClick={logoutAdmin}><LogOut size={16} />Log Out</button>
@@ -548,8 +654,20 @@ function AdminApp() {
       </section>
       {error && <Notice type="error" message={error} onClose={() => setError('')} />}
       {notice && <Notice type="success" message={notice} onClose={() => setNotice('')} />}
-      <div className="admin-grid">
-        <form className="info-panel admin-create" onSubmit={createUser}>
+      <div className="admin-tabs" role="tablist" aria-label="Admin sections">
+        {[
+          ['add-user', 'Add User'],
+          ['users', 'Users'],
+          ['formulas', 'Formulas']
+        ].map(([value, label]) => (
+          <button type="button" key={value} className={adminSection === value ? 'active' : ''} onClick={() => setAdminSection(value)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="admin-section-body">
+        {adminSection === 'add-user' && (
+        <form className="info-panel admin-create admin-section-panel" onSubmit={createUser}>
           <div className="panel-title-row">
             <UserPlus size={20} />
             <h3>Add User</h3>
@@ -569,7 +687,9 @@ function AdminApp() {
             {loading ? 'Saving...' : 'Add User'}
           </button>
         </form>
-        <section className="info-panel">
+        )}
+        {adminSection === 'users' && (
+        <section className="info-panel admin-section-panel">
           <div className="panel-title-row">
             <User size={20} />
             <h3>Users</h3>
@@ -591,8 +711,63 @@ function AdminApp() {
             </div>
           )}
         </section>
+        )}
+        {adminSection === 'formulas' && (
+          <FormulaSettingsPanel
+            settings={adminSettings}
+            multiplier={formulaMultiplier}
+            setMultiplier={setFormulaMultiplier}
+            onSave={saveFormulaMultiplier}
+          />
+        )}
       </div>
     </main>
+  );
+}
+
+function FormulaSettingsPanel({ settings, multiplier, setMultiplier, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    const ok = await onSave();
+    setSaving(false);
+    if (ok) setEditing(false);
+  }
+
+  return (
+    <section className="info-panel admin-section-panel formula-panel">
+      <div className="panel-title-row">
+        <Settings size={20} />
+        <h3>Formulas</h3>
+      </div>
+      <div className="formula-card">
+        <div>
+          <span className="eyebrow">Total Cost (per product)</span>
+          <h3>Total Cost = Ingredients Cost x {settings?.formulas?.totalCostMultiplier ?? multiplier}</h3>
+          <p>Used across the calculator when displaying product total costs.</p>
+        </div>
+        {editing ? (
+          <div className="formula-edit">
+            <TextField label="Multiplier" type="number" value={multiplier} onChange={setMultiplier} />
+            <div className="button-row">
+              <button type="button" className="primary-button" disabled={saving} onClick={save}><Save size={17} />{saving ? 'Saving...' : 'Save'}</button>
+              <button type="button" className="secondary-button" disabled={saving} onClick={() => {
+                setMultiplier(settings?.formulas?.totalCostMultiplier ?? 2.5);
+                setEditing(false);
+              }}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" className="secondary-button fit-button" onClick={() => setEditing(true)}><Pencil size={16} />Edit</button>
+        )}
+      </div>
+      <div className="formula-reference">
+        <strong>Ingredients Cost</strong>
+        <p>Ingredients Cost is the sum of all ingredient portions in a product, based on each raw material cost and the relative quantity used.</p>
+      </div>
+    </section>
   );
 }
 
@@ -852,7 +1027,7 @@ function ViewRouter({ context }) {
   return <HomeView {...context} />;
 }
 
-function Sidebar({ activeView, canView, canEdit, onNavigate, onNewProduct, mobileOpen, onClose }) {
+function Sidebar({ activeView, canView, canEdit, collapsed, onToggleCollapsed, onNavigate, onNewProduct, mobileOpen, onClose }) {
   const nav = [
     { id: 'home', label: 'Home', icon: Home },
     { id: 'materials', label: 'Raw Materials', icon: Wheat },
@@ -863,13 +1038,16 @@ function Sidebar({ activeView, canView, canEdit, onNavigate, onNewProduct, mobil
   return (
     <>
       {mobileOpen && <button className="scrim" onClick={onClose} aria-label="Close navigation" />}
-      <aside className={`sidebar ${mobileOpen ? 'is-open' : ''}`}>
+      <aside className={`sidebar ${mobileOpen ? 'is-open' : ''} ${collapsed ? 'is-collapsed' : ''}`}>
         <div className="brand-row">
           <div className="brand-mark"><Calculator size={23} /></div>
-          <div>
+          <div className="brand-copy">
             <h1>Item Cost</h1>
             <p>Calculator</p>
           </div>
+          <button className="icon-button sidebar-toggle" onClick={onToggleCollapsed} aria-label={collapsed ? 'Open sidebar' : 'Collapse sidebar'}>
+            <Menu size={18} />
+          </button>
           <button className="icon-button mobile-only" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
@@ -886,7 +1064,7 @@ function Sidebar({ activeView, canView, canEdit, onNavigate, onNewProduct, mobil
             );
           })}
         </nav>
-        {canEdit('products') && (
+        {canEdit('products') && !collapsed && (
           <button className="primary-button full" onClick={onNewProduct}>
             <Plus size={18} />
             New Product
@@ -897,7 +1075,9 @@ function Sidebar({ activeView, canView, canEdit, onNavigate, onNewProduct, mobil
   );
 }
 
-function Header({ title, searchQuery, onSearchChange, searchScope, onSearchScopeChange, showSearchScope, onRefresh, refreshing, onMenu, onSettings, settings, currentUser, canView, onLogout }) {
+function Header({ title, searchQuery, onSearchChange, searchScope, onSearchScopeChange, showSearchScope, onRefresh, refreshing, onMenu, onSettings, settings, currentUser, canView, onChangePassword, onLogout }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
     <header className="header">
       <button className="icon-button mobile-only" onClick={onMenu} aria-label="Open navigation">
@@ -925,9 +1105,21 @@ function Header({ title, searchQuery, onSearchChange, searchScope, onSearchScope
           <Settings size={20} />
         </button>
       )}
-      <div className="user-chip" title={currentUser?.username}>
-        <User size={16} />
-        <span>{currentUser?.username}</span>
+      <div className="user-menu">
+        <button className="user-chip" title={currentUser?.username} onClick={() => setMenuOpen((current) => !current)}>
+          <User size={16} />
+          <span>{currentUser?.username}</span>
+        </button>
+        {menuOpen && (
+          <div className="user-dropdown">
+            <button type="button" onClick={() => {
+              setMenuOpen(false);
+              onChangePassword();
+            }}>
+              <KeyRound size={15} />Change Password
+            </button>
+          </div>
+        )}
       </div>
       <button className="icon-button" onClick={onLogout} aria-label="Log out">
         <LogOut size={19} />
@@ -1233,8 +1425,9 @@ function ProductsView({ products, materials, searchQuery, productSearchScope, se
                 </div>
               </div>
               <div className="cost-lines">
-                <CostLine label="USD Total" value={`$${formatUsd(product.totalCostUSD)}`} />
-                <CostLine label="LBP Total" value={`${Math.round(product.totalCostLBP).toLocaleString()} LBP`} />
+                <CostLine label="USD Ingredient Cost" value={`$${formatUsd(product.ingredientCostUSD)}`} />
+                <CostLine label="USD Total Cost" value={`$${formatUsd(product.totalCostUSD)}`} />
+                <CostLine label="LBP Total Cost" value={`${Math.round(product.totalCostLBP).toLocaleString()} LBP`} />
               </div>
             </button>
           ))}
@@ -1292,6 +1485,7 @@ function ProductDetail({ id, setActiveView, afterMutation, setError, canEdit }) 
         <div>
           <span className="eyebrow">{product.id}</span>
           <h2>{product.name}</h2>
+          <p>Ingredient cost: ${formatUsd(product.ingredientCostUSD)} / {Math.round(product.ingredientCostLBP).toLocaleString()} LBP</p>
           <p>Total cost: ${formatUsd(product.totalCostUSD)} / {Math.round(product.totalCostLBP).toLocaleString()} LBP</p>
         </div>
         {canEditProducts ? (
@@ -1395,7 +1589,12 @@ function ProductForm({ mode, id, products, materials, setActiveView, afterMutati
         </div>
         <aside className="builder-summary">
           <div className="summary-card">
-            <span>Product Total</span>
+            <span>Ingredient Cost</span>
+            <strong>${formatUsd(draft?.ok ? draft.data.ingredientCostUSD : 0)}</strong>
+            <p>{Math.round(draft?.ok ? draft.data.ingredientCostLBP : 0).toLocaleString()} LBP</p>
+          </div>
+          <div className="summary-card total-card">
+            <span>Total Cost</span>
             <strong>${formatUsd(draft?.ok ? draft.data.totalCostUSD : 0)}</strong>
             <p>{Math.round(draft?.ok ? draft.data.totalCostLBP : 0).toLocaleString()} LBP</p>
           </div>
@@ -2047,6 +2246,16 @@ function broadcastUserAccessUpdate() {
     channel.close();
   }
   window.dispatchEvent(new CustomEvent('item-cost-users-updated'));
+}
+
+function broadcastSettingsUpdate() {
+  localStorage.setItem(SETTINGS_SYNC_KEY, new Date().toISOString());
+  if (typeof BroadcastChannel === 'function') {
+    const channel = new BroadcastChannel(SETTINGS_CHANNEL);
+    channel.postMessage({ type: 'settings-updated' });
+    channel.close();
+  }
+  window.dispatchEvent(new CustomEvent('item-cost-settings-updated'));
 }
 
 createRoot(document.getElementById('root')).render(<App />);

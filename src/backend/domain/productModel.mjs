@@ -34,6 +34,10 @@ export function validateSavedProduct(input) {
     }
   }
 
+  if (!isFiniteNumber(input.ingredientCostUSD) || !isFiniteNumber(input.ingredientCostLBP)) {
+    return failureFromCode(ErrorCodes.PRODUCT_INGREDIENTS_REQUIRED);
+  }
+
   if (!isFiniteNumber(input.totalCostUSD) || !isFiniteNumber(input.totalCostLBP)) {
     return failureFromCode(ErrorCodes.PRODUCT_INGREDIENTS_REQUIRED);
   }
@@ -71,4 +75,3 @@ export function validateSavedIngredient(input) {
 
   return success(input);
 }
-

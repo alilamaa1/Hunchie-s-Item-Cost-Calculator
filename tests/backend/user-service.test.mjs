@@ -6,6 +6,7 @@ import { ErrorCodes } from '../../src/shared/errors.mjs';
 import { initializeAppDataFolder } from '../../src/backend/storage/dataFolderInitializer.mjs';
 import {
   authenticateUser,
+  changePassword,
   createUser,
   deleteUser,
   listUsers,
@@ -152,6 +153,31 @@ test('authenticates only active users with matching credentials', async () => {
 
     await updateUser(created.data.id, { isActive: false }, { dataFolder });
     assert.equal((await authenticateUser({ username: 'Ahmad_Lamaa', password: 'secret' }, { dataFolder })).error.code, ErrorCodes.USER_INACTIVE);
+  });
+});
+
+test('users can change their password after entering the current password', async () => {
+  await withDataFolder(async (dataFolder) => {
+    const created = await createUser({ username: 'KitchenUser', password: 'old-secret' }, { dataFolder });
+
+    const wrongPassword = await changePassword(created.data.id, {
+      oldPassword: 'wrong',
+      newPassword: 'new-secret'
+    }, { dataFolder });
+    assert.equal(wrongPassword.ok, false);
+    assert.equal(wrongPassword.error.code, ErrorCodes.LOGIN_INVALID);
+
+    const changed = await changePassword(created.data.id, {
+      oldPassword: 'old-secret',
+      newPassword: 'new-secret'
+    }, { dataFolder });
+    const oldLogin = await authenticateUser({ username: 'KitchenUser', password: 'old-secret' }, { dataFolder });
+    const newLogin = await authenticateUser({ username: 'KitchenUser', password: 'new-secret' }, { dataFolder });
+
+    assert.equal(changed.ok, true);
+    assert.equal('password' in changed.data, false);
+    assert.equal(oldLogin.error.code, ErrorCodes.LOGIN_INVALID);
+    assert.equal(newLogin.ok, true);
   });
 });
 

@@ -40,6 +40,10 @@ export async function updateSettings(input, options = {}) {
         ...current.data.currency,
         ...input?.currency
       },
+      formulas: {
+        ...current.data.formulas,
+        ...input?.formulas
+      },
       dataFolder: current.data.dataFolder
     },
     context.data.dataFolder
@@ -81,6 +85,10 @@ export function mergeSettingsWithDefaults(settings, dataFolder) {
       ...defaults.currency,
       ...settings?.currency
     },
+    formulas: {
+      ...defaults.formulas,
+      ...settings?.formulas
+    },
     dataFolder: settings?.dataFolder || dataFolder
   };
 }
@@ -95,4 +103,3 @@ function requireDataFolder(options = {}) {
     storage: options.storage ?? defaultStorage
   });
 }
-

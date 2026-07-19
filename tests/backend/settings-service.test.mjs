@@ -26,6 +26,7 @@ test('settings service loads exchange rate and data folder display path', async 
 
     assert.equal(result.ok, true);
     assert.equal(result.data.currency.usdToLbp, 90000);
+    assert.equal(result.data.formulas.totalCostMultiplier, 2.5);
     assert.equal(result.data.dataFolder, dataFolder);
   });
 });
@@ -37,6 +38,7 @@ test('settings service merges missing settings with defaults', async () => {
 
     assert.equal(result.ok, true);
     assert.equal(result.data.appVersion, '1.0.0');
+    assert.equal(result.data.formulas.totalCostMultiplier, 2.5);
   });
 });
 
@@ -63,3 +65,12 @@ test('settings service updates exchange rate, returns warning, and preserves dat
   });
 });
 
+test('settings service updates total cost formula multiplier', async () => {
+  await withDataFolder(async (dataFolder) => {
+    const result = await updateSettings({ formulas: { totalCostMultiplier: 3.1 } }, { dataFolder });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.data.settings.formulas.totalCostMultiplier, 3.1);
+    assert.equal(JSON.parse(await readFile(join(dataFolder, 'settings.json'), 'utf8')).formulas.totalCostMultiplier, 3.1);
+  });
+});

@@ -19,6 +19,7 @@ import {
   searchProducts,
   updateProduct
 } from '../../src/backend/services/productService.mjs';
+import { updateSettings } from '../../src/backend/services/settingsService.mjs';
 import { createTempAppDataFolder, removeTempAppDataFolder } from './helpers/tempAppData.mjs';
 
 function materialInput(name, overrides = {}) {
@@ -137,8 +138,10 @@ test('ingredient portion and product totals calculate with base, compatible, cus
     assert.equal(draft.data.ingredients[0].convertedQuantity, 0.24);
     assert.equal(draft.data.ingredients[0].convertedUnit, 'kg');
     assert.ok(draft.data.ingredients.every((ingredient) => typeof ingredient.portionCostUSD === 'number' && typeof ingredient.portionCostLBP === 'number'));
-    assert.equal(draft.data.totalCostUSD, draft.data.ingredients.reduce((sum, ingredient) => sum + ingredient.portionCostUSD, 0));
-    assert.equal(draft.data.totalCostLBP, draft.data.ingredients.reduce((sum, ingredient) => sum + ingredient.portionCostLBP, 0));
+    assert.equal(draft.data.ingredientCostUSD, draft.data.ingredients.reduce((sum, ingredient) => sum + ingredient.portionCostUSD, 0));
+    assert.equal(draft.data.ingredientCostLBP, draft.data.ingredients.reduce((sum, ingredient) => sum + ingredient.portionCostLBP, 0));
+    assert.equal(draft.data.totalCostUSD, draft.data.ingredientCostUSD * 2.5);
+    assert.equal(draft.data.totalCostLBP, draft.data.ingredientCostLBP * 2.5);
   });
 });
 
@@ -194,7 +197,26 @@ test('product recalculates from latest raw material costs', async () => {
       ingredients: [{ rawMaterialId: materials.flour.id, quantity: 1, unit: 'kg' }]
     }), { dataFolder });
 
-    assert.equal(edited.data.totalCostUSD, 1.6);
+    assert.equal(edited.data.ingredientCostUSD, 1.6);
+    assert.equal(edited.data.totalCostUSD, 4);
+  });
+});
+
+test('product totals use saved formula multiplier when listing existing products', async () => {
+  await withDataFolder(async (dataFolder, materials) => {
+    const created = await createProduct(productInput(materials, {
+      ingredients: [{ rawMaterialId: materials.flour.id, quantity: 1, unit: 'kg' }]
+    }), { dataFolder });
+    await updateSettings({ formulas: { totalCostMultiplier: 3 } }, { dataFolder });
+
+    const listed = await listProducts({ dataFolder });
+    const detail = await getProductById(created.data.id, { dataFolder });
+
+    assert.equal(created.data.ingredientCostUSD, 0.8);
+    assert.equal(created.data.totalCostUSD, 2);
+    assert.equal(listed.data[0].ingredientCostUSD, 0.8);
+    assert.equal(listed.data[0].totalCostUSD, 2.4);
+    assert.equal(detail.data.totalCostUSD, 2.4);
   });
 });
 

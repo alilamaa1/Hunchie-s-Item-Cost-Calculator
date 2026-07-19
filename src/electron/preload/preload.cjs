@@ -21,6 +21,7 @@ const channels = {
   USER_CREATE: 'user:create',
   USER_UPDATE: 'user:update',
   USER_DELETE: 'user:delete',
+  USER_PASSWORD_CHANGE: 'user:password-change',
   USER_AUTHENTICATE: 'user:authenticate'
 };
 
@@ -45,5 +46,6 @@ contextBridge.exposeInMainWorld('itemCostApi', {
   createUser: (input) => ipcRenderer.invoke(channels.USER_CREATE, input),
   updateUser: (id, input) => ipcRenderer.invoke(channels.USER_UPDATE, id, input),
   deleteUser: (id) => ipcRenderer.invoke(channels.USER_DELETE, id),
+  changePassword: (id, input) => ipcRenderer.invoke(channels.USER_PASSWORD_CHANGE, id, input),
   authenticateUser: (input) => ipcRenderer.invoke(channels.USER_AUTHENTICATE, input)
 });

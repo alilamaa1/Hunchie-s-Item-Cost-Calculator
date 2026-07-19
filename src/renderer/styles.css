@@ -55,8 +55,8 @@ button {
   position: fixed;
   inset: 0 auto 0 0;
   z-index: 30;
-  width: 280px;
-  padding: 24px;
+  width: 232px;
+  padding: 18px 14px;
   background: rgba(255, 255, 255, 0.94);
   border-right: 1px solid var(--border);
   box-shadow: 10px 0 34px rgba(23, 23, 23, 0.05);
@@ -65,11 +65,21 @@ button {
   backdrop-filter: blur(18px);
 }
 
+.sidebar.is-collapsed {
+  width: 74px;
+  align-items: center;
+}
+
 .brand-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
+}
+
+.sidebar.is-collapsed .brand-row {
+  flex-direction: column;
+  gap: 10px;
 }
 
 .brand-row h1,
@@ -89,6 +99,21 @@ button {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.brand-copy {
+  min-width: 0;
+}
+
+.sidebar-toggle {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.sidebar.is-collapsed .brand-copy,
+.sidebar.is-collapsed .nav-list,
+.sidebar.is-collapsed .mobile-only {
+  display: none;
 }
 
 .brand-mark {
@@ -129,7 +154,7 @@ button {
 .nav-item {
   justify-content: flex-start;
   width: 100%;
-  padding: 13px 14px;
+  padding: 11px 12px;
   border-radius: 10px;
   background: transparent;
   color: var(--muted);
@@ -169,7 +194,12 @@ button {
 
 .app-main {
   width: 100%;
-  padding-left: 280px;
+  padding-left: 232px;
+  transition: padding-left 180ms ease;
+}
+
+.app-shell.is-sidebar-collapsed .app-main {
+  padding-left: 74px;
 }
 
 .header {
@@ -265,6 +295,10 @@ button {
   cursor: wait;
 }
 
+.user-menu {
+  position: relative;
+}
+
 .user-chip {
   max-width: 180px;
   min-height: 39px;
@@ -280,10 +314,47 @@ button {
   font-weight: 800;
 }
 
+.user-chip:hover {
+  background: var(--surface-soft);
+}
+
 .user-chip span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.user-dropdown {
+  position: absolute;
+  z-index: 35;
+  top: calc(100% + 7px);
+  right: 0;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  display: grid;
+  gap: 4px;
+}
+
+.user-dropdown button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 9px;
+  color: var(--ink);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.user-dropdown button:hover {
+  background: var(--surface-soft);
 }
 
 .content {
@@ -975,6 +1046,12 @@ button {
   box-shadow: var(--shadow-lg);
 }
 
+.summary-card.total-card {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12), transparent 44%),
+    #26231f;
+}
+
 .summary-card span {
   font-size: 11px;
   font-weight: 900;
@@ -1163,6 +1240,36 @@ button {
   gap: 18px;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  padding: 20px;
+  background: rgba(23, 23, 23, 0.38);
+  display: grid;
+  place-items: center;
+}
+
+.modal-panel {
+  width: min(430px, 100%);
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  gap: 15px;
+}
+
+.modal-panel h3,
+.modal-panel p {
+  margin: 0;
+}
+
+.modal-panel p {
+  color: var(--muted);
+}
+
 .auth-logo {
   width: 118px;
   height: auto;
@@ -1218,7 +1325,8 @@ button {
 }
 
 .admin-page > .notice,
-.admin-grid {
+.admin-tabs,
+.admin-section-body {
   max-width: 1120px;
   margin-left: auto;
   margin-right: auto;
@@ -1228,11 +1336,75 @@ button {
   margin-bottom: 12px;
 }
 
-.admin-grid {
+.admin-tabs {
+  margin-bottom: 16px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  display: flex;
+  gap: 5px;
+  width: fit-content;
+}
+
+.admin-tabs button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 14px;
+  color: var(--muted);
+  background: transparent;
+  font-weight: 850;
+}
+
+.admin-tabs button.active,
+.admin-tabs button:hover {
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.admin-section-body {
   display: grid;
-  grid-template-columns: 390px minmax(0, 1fr);
+}
+
+.admin-section-panel {
+  width: min(100%, 760px);
+}
+
+.formula-panel {
   gap: 18px;
+}
+
+.formula-card,
+.formula-reference {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfaf8;
+}
+
+.formula-card {
+  display: flex;
   align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.formula-card h3,
+.formula-card p,
+.formula-reference p {
+  margin: 0;
+}
+
+.formula-card p,
+.formula-reference p {
+  color: var(--muted);
+}
+
+.formula-edit {
+  min-width: 220px;
+  display: grid;
+  gap: 10px;
 }
 
 .admin-search {
@@ -1492,8 +1664,13 @@ button {
 
 @media (max-width: 920px) {
   .sidebar {
+    width: 232px;
     transform: translateX(-100%);
     transition: transform 180ms ease;
+  }
+
+  .sidebar.is-collapsed {
+    width: 74px;
   }
 
   .sidebar.is-open {
@@ -1501,6 +1678,10 @@ button {
   }
 
   .app-main {
+    padding-left: 0;
+  }
+
+  .app-shell.is-sidebar-collapsed .app-main {
     padding-left: 0;
   }
 
@@ -1550,6 +1731,15 @@ button {
     justify-content: space-between;
   }
 
+  .formula-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .formula-edit {
+    min-width: 0;
+  }
+
   .cta-band,
   .page-title,
   .detail-panel,
@@ -1585,6 +1775,15 @@ button {
 
   .admin-search {
     display: flex;
+  }
+
+  .admin-tabs {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .admin-tabs button {
+    flex: 1 0 auto;
   }
 
   .user-chip {

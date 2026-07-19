@@ -22,6 +22,7 @@ export function registerIpcHandlers(ipcMain, services, contextFactory = () => ({
     [IpcChannels.USER_CREATE]: (_event, input) => services.createUser(input, contextFactory()),
     [IpcChannels.USER_UPDATE]: (_event, id, input) => services.updateUser(id, input, contextFactory()),
     [IpcChannels.USER_DELETE]: (_event, id) => services.deleteUser(id, contextFactory()),
+    [IpcChannels.USER_PASSWORD_CHANGE]: (_event, id, input) => services.changePassword(id, input, contextFactory()),
     [IpcChannels.USER_AUTHENTICATE]: (_event, input) => services.authenticateUser(input, contextFactory())
   };
 

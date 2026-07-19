@@ -26,6 +26,7 @@ const handlers = Object.freeze({
   createUser: (input) => services.createUser(input, context()),
   updateUser: (id, input) => services.updateUser(id, input, context()),
   deleteUser: (id) => services.deleteUser(id, context()),
+  changePassword: (id, input) => services.changePassword(id, input, context()),
   authenticateUser: (input) => services.authenticateUser(input, context())
 });
 

@@ -22,6 +22,7 @@ export function createPreloadApi(ipcRenderer) {
     createUser: (input) => ipcRenderer.invoke(IpcChannels.USER_CREATE, input),
     updateUser: (id, input) => ipcRenderer.invoke(IpcChannels.USER_UPDATE, id, input),
     deleteUser: (id) => ipcRenderer.invoke(IpcChannels.USER_DELETE, id),
+    changePassword: (id, input) => ipcRenderer.invoke(IpcChannels.USER_PASSWORD_CHANGE, id, input),
     authenticateUser: (input) => ipcRenderer.invoke(IpcChannels.USER_AUTHENTICATE, input)
   });
 }
@@ -47,5 +48,6 @@ export const APPROVED_PRELOAD_API_KEYS = Object.freeze([
   'createUser',
   'updateUser',
   'deleteUser',
+  'changePassword',
   'authenticateUser'
 ]);

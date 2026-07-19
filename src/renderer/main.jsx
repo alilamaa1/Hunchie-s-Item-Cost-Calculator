@@ -176,6 +176,10 @@ function MainApp() {
     setLoading(false);
   }
 
+  async function handleRefresh() {
+    await refreshAppShell(refreshAll);
+  }
+
   function applyError(result) {
     setError(result.error?.message ?? 'Something went wrong.');
     setLoading(false);
@@ -189,7 +193,7 @@ function MainApp() {
     }
   }, [currentUser?.id]);
 
-  usePullToRefresh(Boolean(currentUser), refreshAll);
+  usePullToRefresh(Boolean(currentUser), handleRefresh);
 
   useEffect(() => {
     function syncCurrentUser() {
@@ -334,7 +338,7 @@ function MainApp() {
           searchScope={productSearchScope}
           onSearchScopeChange={setProductSearchScope}
           showSearchScope={activeView.name === 'products'}
-          onRefresh={refreshAll}
+          onRefresh={handleRefresh}
           refreshing={loading}
           onMenu={() => setMobileNavOpen(true)}
           onSettings={() => setActiveView({ name: 'settings' })}
@@ -493,6 +497,10 @@ function AdminApp() {
     await Promise.all([loadUsers(), loadAdminSettings()]);
   }
 
+  async function handleAdminRefresh() {
+    await refreshAppShell(refreshAdminData);
+  }
+
   async function submitPin(event) {
     event.preventDefault();
     setError('');
@@ -613,7 +621,7 @@ function AdminApp() {
 
   const filteredUsers = filterUsers(users, userSearch);
 
-  usePullToRefresh(authorized, refreshAdminData);
+  usePullToRefresh(authorized, handleAdminRefresh);
 
   if (!authorized) {
     return (
@@ -645,7 +653,7 @@ function AdminApp() {
           <p>Create users and decide who can still access the Item Cost Calculator.</p>
         </div>
         <div className="button-row">
-          <button className="secondary-button" type="button" onClick={refreshAdminData} disabled={usersRefreshing}>
+          <button className="secondary-button" type="button" onClick={handleAdminRefresh} disabled={usersRefreshing}>
             <RefreshCw size={16} />{usersRefreshing ? 'Refreshing...' : 'Refresh'}
           </button>
           <button className="secondary-button" type="button" onClick={logoutAdmin}><LogOut size={16} />Log Out</button>
@@ -2232,6 +2240,64 @@ function usePullToRefresh(enabled, onRefresh) {
       window.removeEventListener('touchend', onTouchEnd);
     };
   }, [enabled, onRefresh]);
+}
+
+async function refreshAppShell(refreshData) {
+  if (await hasNewAppShell()) {
+    reloadCurrentRoute();
+    return;
+  }
+  await refreshData();
+}
+
+async function hasNewAppShell() {
+  if (typeof window === 'undefined' || !window.location.protocol.startsWith('http')) {
+    return false;
+  }
+
+  try {
+    const currentAssets = readCurrentAppAssets();
+    if (currentAssets.size === 0) return false;
+
+    const indexUrl = new URL('/', window.location.origin);
+    indexUrl.searchParams.set('appShellCheck', Date.now().toString());
+    const response = await fetch(indexUrl.toString(), { cache: 'no-store' });
+    if (!response.ok) return false;
+
+    const latestAssets = readHtmlAppAssets(await response.text());
+    return latestAssets.some((asset) => !currentAssets.has(asset));
+  } catch {
+    return false;
+  }
+}
+
+function readCurrentAppAssets() {
+  return new Set(Array.from(document.querySelectorAll('script[src], link[rel="stylesheet"][href]'))
+    .map((element) => element.getAttribute('src') ?? element.getAttribute('href'))
+    .filter(Boolean)
+    .map(normalizeAssetPath)
+    .filter(Boolean));
+}
+
+function readHtmlAppAssets(html) {
+  return [
+    ...Array.from(html.matchAll(/<script[^>]+src="([^"]+\/assets\/[^"]+)"/g), (match) => normalizeAssetPath(match[1])),
+    ...Array.from(html.matchAll(/<link[^>]+href="([^"]+\/assets\/[^"]+)"/g), (match) => normalizeAssetPath(match[1]))
+  ].filter(Boolean);
+}
+
+function normalizeAssetPath(asset) {
+  try {
+    return new URL(asset, window.location.origin).pathname;
+  } catch {
+    return '';
+  }
+}
+
+function reloadCurrentRoute() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('appRefresh', Date.now().toString());
+  window.location.replace(url.toString());
 }
 
 function sanitizeUsernameInput(value) {

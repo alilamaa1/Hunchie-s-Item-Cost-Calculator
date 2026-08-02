@@ -1,4 +1,4 @@
-import { get, head, list, put } from '@vercel/blob';
+import { del, get, head, list, put } from '@vercel/blob';
 import { basename } from 'node:path';
 import { ErrorCodes } from '../../shared/errors.mjs';
 import { failureFromCode, success } from '../../shared/result.mjs';
@@ -6,6 +6,8 @@ import { createBackupFileName } from './jsonStorage.mjs';
 
 const DATA_PREFIX = 'app-data';
 const JSON_FILES = new Set(['raw_materials.json', 'products.json', 'batches.json', 'users.json', 'settings.json']);
+const VERSION_RETAIN_COUNT = 1;
+const BACKUP_RETAIN_COUNT = 5;
 
 export function isVersionedJsonFileName(fileName) {
   return JSON_FILES.has(fileName);
@@ -35,6 +37,7 @@ export const blobFileSystem = Object.freeze({
       allowOverwrite: false,
       contentType: 'application/json'
     });
+    await cleanupOldVersions(filePath);
   }
 });
 
@@ -70,6 +73,7 @@ export async function writeJsonFile(filePath, data) {
       allowOverwrite: false,
       contentType: 'application/json'
     });
+    await cleanupOldVersions(filePath);
     return success({ path: filePath, blobPath: pathname });
   } catch (error) {
     return failureFromCode(ErrorCodes.FILE_SAVE_ERROR, {
@@ -90,6 +94,7 @@ export async function backupJsonFile(filePath, backupsFolder, options = {}) {
       allowOverwrite: false,
       contentType: 'application/json'
     });
+    await cleanupOldBackups();
     return success({ backupPath });
   } catch (error) {
     if (isBlobNotFound(error)) return failureFromCode(ErrorCodes.FILE_MISSING, { path: filePath });
@@ -104,6 +109,17 @@ export function createUniqueBackupFileName(filePath, date) {
   const name = createBackupFileName(filePath, date);
   const unique = `${date.getTime()}-${Math.random().toString(36).slice(2, 10)}`;
   return name.replace(/\.json$/i, `_${unique}.json`);
+}
+
+export function selectBlobPathnamesToDelete(blobs, keepCount) {
+  return [...blobs]
+    .filter((blob) => blob?.pathname)
+    .sort((first, second) => {
+      const dateDiff = new Date(second.uploadedAt).getTime() - new Date(first.uploadedAt).getTime();
+      return dateDiff || String(second.pathname).localeCompare(String(first.pathname));
+    })
+    .slice(keepCount)
+    .map((blob) => blob.pathname);
 }
 
 async function latestVersionPath(filePath) {
@@ -122,6 +138,35 @@ async function latestVersionPath(filePath) {
     })[0];
 
   return latest?.pathname ?? null;
+}
+
+async function cleanupOldVersions(filePath) {
+  const fileName = basename(String(filePath).replace(/\\/g, '/'));
+  if (!JSON_FILES.has(fileName)) return;
+
+  try {
+    const result = await list({
+      prefix: `${DATA_PREFIX}/versions/${fileName}/`,
+      limit: 1000
+    });
+    const deletions = selectBlobPathnamesToDelete(result.blobs, VERSION_RETAIN_COUNT);
+    if (deletions.length > 0) await del(deletions);
+  } catch {
+    // Retention is best-effort; a successful save should not fail because cleanup could not run.
+  }
+}
+
+async function cleanupOldBackups() {
+  try {
+    const result = await list({
+      prefix: `${DATA_PREFIX}/backups/`,
+      limit: 1000
+    });
+    const deletions = selectBlobPathnamesToDelete(result.blobs, BACKUP_RETAIN_COUNT);
+    if (deletions.length > 0) await del(deletions);
+  } catch {
+    // Retention is best-effort; backups are useful, but not worth blocking normal saves.
+  }
 }
 
 function toVersionBlobPath(filePath) {

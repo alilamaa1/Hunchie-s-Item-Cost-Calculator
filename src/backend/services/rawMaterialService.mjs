@@ -114,19 +114,18 @@ export function calculateProductionRawMaterialDraft(input, rawMaterials, options
   if (!name) return failureFromCode(ErrorCodes.RAW_MATERIAL_NAME_REQUIRED);
   if (!['kg', 'g'].includes(input?.baseUnit)) return failureFromCode(ErrorCodes.BASE_UNIT_UNSUPPORTED);
 
-  const finalWeight = normalizeWeight(input?.finalWeight);
-  if (!finalWeight) return failureFromCode(ErrorCodes.PURCHASE_QUANTITY_INVALID);
-
   const ingredients = calculateRecipeIngredients(input?.ingredients, rawMaterials, exchangeRate, input?.id);
   if (!ingredients.ok) return ingredients;
 
-  const convertedFinalWeight = convertQuantity(finalWeight.quantity, finalWeight.unit, input.baseUnit, {});
-  if (!convertedFinalWeight.ok) return convertedFinalWeight;
+  const finalWeight = normalizeWeight(input?.finalWeight);
+  const costingWeight = finalWeight ?? { quantity: ingredients.data.ingredientWeightGrams, unit: 'g' };
+  const convertedCostingWeight = convertQuantity(costingWeight.quantity, costingWeight.unit, input.baseUnit, {});
+  if (!convertedCostingWeight.ok) return convertedCostingWeight;
 
   const purchasePriceUSD = roundCalculation(ingredients.data.ingredientCostUSD);
   const purchasePriceLBP = roundCalculation(ingredients.data.ingredientCostLBP);
-  const costPerBaseUnitUSD = roundCalculation(purchasePriceUSD / convertedFinalWeight.data.quantity);
-  const costPerBaseUnitLBP = roundCalculation(purchasePriceLBP / convertedFinalWeight.data.quantity);
+  const costPerBaseUnitUSD = roundCalculation(purchasePriceUSD / convertedCostingWeight.data.quantity);
+  const costPerBaseUnitLBP = roundCalculation(purchasePriceLBP / convertedCostingWeight.data.quantity);
 
   return success({
     name,
@@ -135,8 +134,8 @@ export function calculateProductionRawMaterialDraft(input, rawMaterials, options
     brand: '',
     materialName: name,
     baseUnit: input.baseUnit,
-    purchaseQuantity: finalWeight.quantity,
-    purchaseUnit: finalWeight.unit,
+    purchaseQuantity: costingWeight.quantity,
+    purchaseUnit: costingWeight.unit,
     purchaseCurrency: 'USD',
     purchasePriceUSD,
     purchasePriceLBP,

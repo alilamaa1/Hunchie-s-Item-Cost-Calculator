@@ -92,6 +92,29 @@ test('production raw materials calculate cost from recipe and update when ingred
   });
 });
 
+test('production raw material final weight is optional and falls back to ingredient weight for costing', async () => {
+  await withDataFolder(async (dataFolder) => {
+    const flour = await createRawMaterial(supplierMaterial(), { dataFolder });
+    const mix = await createRawMaterial({
+      sourceType: 'production',
+      name: 'No Yield Mix',
+      baseUnit: 'g',
+      finalWeight: { quantity: 0, unit: 'g' },
+      ingredients: [
+        { rawMaterialId: flour.data.id, quantity: 1, unit: 'kg' }
+      ]
+    }, { dataFolder });
+
+    assert.equal(mix.ok, true);
+    assert.equal(mix.data.finalWeight, null);
+    assert.equal(mix.data.ingredientWeightGrams, 1000);
+    assert.equal(mix.data.purchaseQuantity, 1000);
+    assert.equal(mix.data.purchaseUnit, 'g');
+    assert.equal(mix.data.purchasePriceUSD, 0.5);
+    assert.equal(mix.data.costPerBaseUnitUSD, 0.0005);
+  });
+});
+
 test('batch production stores batch totals and per-unit totals separately from products', async () => {
   await withDataFolder(async (dataFolder) => {
     const flour = await createRawMaterial(supplierMaterial(), { dataFolder });

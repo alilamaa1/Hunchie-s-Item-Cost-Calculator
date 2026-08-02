@@ -334,8 +334,6 @@ function calculateProductDraft(input, materials, settings = defaultSettings) {
 function calculateProductionMaterialDraft(input, materials) {
   const name = String(input?.name ?? '').trim();
   if (!name) return fail('Enter a raw material name.');
-  const finalWeight = optionalWeight(input?.finalWeight);
-  if (!finalWeight) return fail('Enter a purchase quantity greater than zero.');
   const baseUnit = ['kg', 'g'].includes(input?.baseUnit) ? input.baseUnit : 'g';
   const product = calculateProductDraft({
     name,
@@ -343,7 +341,9 @@ function calculateProductionMaterialDraft(input, materials) {
     ingredients: input?.ingredients ?? []
   }, materials, readJson(STORAGE_KEYS.settings, defaultSettings));
   if (!product.ok) return product;
-  const finalBaseQuantity = convert(finalWeight.quantity, finalWeight.unit, baseUnit, {});
+  const finalWeight = optionalWeight(input?.finalWeight);
+  const costingWeight = finalWeight ?? { quantity: product.data.ingredientWeightGrams, unit: 'g' };
+  const finalBaseQuantity = convert(costingWeight.quantity, costingWeight.unit, baseUnit, {});
   if (!finalBaseQuantity) return fail('Add the missing unit conversion for this raw material.');
   return ok({
     name,
@@ -352,8 +352,8 @@ function calculateProductionMaterialDraft(input, materials) {
     brand: '',
     materialName: name,
     baseUnit,
-    purchaseQuantity: finalWeight.quantity,
-    purchaseUnit: finalWeight.unit,
+    purchaseQuantity: costingWeight.quantity,
+    purchaseUnit: costingWeight.unit,
     purchaseCurrency: 'USD',
     purchasePriceUSD: product.data.ingredientCostUSD,
     purchasePriceLBP: product.data.ingredientCostLBP,

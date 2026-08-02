@@ -1461,7 +1461,7 @@ function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, se
     let cancelled = false;
     async function calculate() {
       const canCalculateSupplier = !isProduction && (form.name || (form.supplier && form.brand && form.materialName)) && form.purchaseQuantity && form.purchasePrice !== '';
-      const canCalculateProduction = isProduction && form.name && form.finalWeight?.quantity;
+      const canCalculateProduction = isProduction && form.name;
       if (!api || (!canCalculateSupplier && !canCalculateProduction)) {
         setDraft(null);
         return;
@@ -1523,7 +1523,7 @@ function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, se
               <div className="compact-form-grid">
                 <TextField label="Name" value={form.name} onChange={(value) => setFormValue(setForm, 'name', value)} placeholder="Whipping Cream X" />
                 <SelectField label="Base Unit" value={form.baseUnit} onChange={(value) => setFormValue(setForm, 'baseUnit', value)} options={[['g', 'g'], ['kg', 'kg']]} />
-                <TextField label="Final Weight" type="number" value={form.finalWeight?.quantity} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'quantity', value)} />
+                <TextField label="Final Weight (optional)" type="number" value={form.finalWeight?.quantity} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'quantity', value)} />
                 <SelectField label="Final Unit" value={form.finalWeight?.unit} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'unit', value)} options={[['g', 'g'], ['kg', 'kg']]} />
               </div>
             </InfoPanel>
@@ -1801,7 +1801,7 @@ function ProductForm({ mode, id, products, materials, setActiveView, afterMutati
               <TextField label="Product Name" value={form.name} onChange={(value) => setFormValue(setForm, 'name', value)} placeholder="Chocolate Cake" />
               <SelectField label="Category" value={form.category} onChange={(value) => setFormValue(setForm, 'category', value)} options={productCategoryOptions()} />
               <TextField label="Servings" type="number" value={form.servingCount} onChange={(value) => setFormValue(setForm, 'servingCount', value)} />
-              <TextField label="Final Weight" type="number" value={form.finalWeight?.quantity} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'quantity', value)} />
+              <TextField label="Final Weight (optional)" type="number" value={form.finalWeight?.quantity} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'quantity', value)} />
               <SelectField label="Final Unit" value={form.finalWeight?.unit} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'unit', value)} options={[['g', 'g'], ['kg', 'kg']]} />
             </div>
           </InfoPanel>
@@ -2025,7 +2025,7 @@ function BatchForm({ mode, id, batches, materials, setActiveView, afterMutation,
               <SelectField label="Category" value={form.category} onChange={(value) => setFormValue(setForm, 'category', value)} options={productCategoryOptions()} />
               <TextField label="Servings per unit" type="number" value={form.servingCount} onChange={(value) => setFormValue(setForm, 'servingCount', value)} />
               <TextField label="Quantity made" type="number" value={form.batchQuantity} onChange={(value) => setFormValue(setForm, 'batchQuantity', value)} />
-              <TextField label="Batch final weight" type="number" value={form.finalWeight?.quantity} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'quantity', value)} />
+              <TextField label="Batch final weight (optional)" type="number" value={form.finalWeight?.quantity} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'quantity', value)} />
               <SelectField label="Final Unit" value={form.finalWeight?.unit} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'unit', value)} options={[['g', 'g'], ['kg', 'kg']]} />
             </div>
           </InfoPanel>

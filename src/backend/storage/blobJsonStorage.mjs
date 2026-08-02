@@ -5,7 +5,11 @@ import { failureFromCode, success } from '../../shared/result.mjs';
 import { createBackupFileName } from './jsonStorage.mjs';
 
 const DATA_PREFIX = 'app-data';
-const JSON_FILES = new Set(['raw_materials.json', 'products.json', 'users.json', 'settings.json']);
+const JSON_FILES = new Set(['raw_materials.json', 'products.json', 'batches.json', 'users.json', 'settings.json']);
+
+export function isVersionedJsonFileName(fileName) {
+  return JSON_FILES.has(fileName);
+}
 
 export const blobFileSystem = Object.freeze({
   access: async (filePath) => {

@@ -42,8 +42,10 @@ const DEPARTMENT_OPTIONS_KEY = 'item_cost_department_options';
 
 const sectionConfig = [
   { id: 'home', label: 'Home', editable: false },
-  { id: 'materials', label: 'Raw Materials', editable: true },
+  { id: 'materials', label: 'Raw Materials Supplier', editable: true },
+  { id: 'productionMaterials', label: 'Production Raw Materials', editable: true },
   { id: 'products', label: 'Products', editable: true },
+  { id: 'batches', label: 'Batch Production', editable: true },
   { id: 'settings', label: 'Settings', editable: true }
 ];
 
@@ -63,7 +65,11 @@ function createEmptyUserForm() {
 }
 
 const emptyRawMaterialForm = {
+  sourceType: 'supplier',
   name: '',
+  supplier: '',
+  brand: '',
+  materialName: '',
   baseUnit: 'kg',
   purchaseQuantity: '',
   purchaseUnit: 'kg',
@@ -122,6 +128,19 @@ const homeGreetings = [
 
 const emptyProductForm = {
   name: '',
+  category: 'cake',
+  servingCount: '',
+  finalWeight: { quantity: '', unit: 'g' },
+  visions: [],
+  ingredients: [{ rawMaterialId: '', quantity: '', unit: '' }]
+};
+
+const emptyBatchForm = {
+  name: '',
+  category: 'cake',
+  servingCount: '',
+  batchQuantity: '',
+  finalWeight: { quantity: '', unit: 'g' },
   ingredients: [{ rawMaterialId: '', quantity: '', unit: '' }]
 };
 
@@ -141,6 +160,7 @@ function MainApp() {
   const [productSearchScope, setProductSearchScope] = useState('all');
   const [materials, setMaterials] = useState([]);
   const [products, setProducts] = useState([]);
+  const [batches, setBatches] = useState([]);
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -160,18 +180,21 @@ function MainApp() {
     const init = await api.initializeApp();
     if (!init.ok) return applyError(init);
 
-    const [rawMaterialsResult, productsResult, settingsResult] = await Promise.all([
+    const [rawMaterialsResult, productsResult, batchesResult, settingsResult] = await Promise.all([
       api.listRawMaterials(),
       api.listProducts(),
+      api.listBatches?.() ?? Promise.resolve({ ok: true, data: [] }),
       api.loadSettings()
     ]);
 
     if (!rawMaterialsResult.ok) return applyError(rawMaterialsResult);
     if (!productsResult.ok) return applyError(productsResult);
+    if (!batchesResult.ok) return applyError(batchesResult);
     if (!settingsResult.ok) return applyError(settingsResult);
 
     setMaterials(rawMaterialsResult.data);
     setProducts(productsResult.data);
+    setBatches(batchesResult.data);
     setSettings(settingsResult.data);
     setLoading(false);
   }
@@ -230,10 +253,12 @@ function MainApp() {
     window.addEventListener('storage', handleStorage);
     window.addEventListener('item-cost-users-updated', syncCurrentUser);
     window.addEventListener('item-cost-settings-updated', refreshAll);
+    const accessPoll = window.setInterval(syncCurrentUser, 2000);
     return () => {
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('item-cost-users-updated', syncCurrentUser);
       window.removeEventListener('item-cost-settings-updated', refreshAll);
+      window.clearInterval(accessPoll);
       channel?.close();
       settingsChannel?.close();
     };
@@ -244,7 +269,7 @@ function MainApp() {
     if (canView(sectionForView(activeView.name))) return;
     const fallback = firstVisibleSection(userPermissions);
     if (fallback && activeView.name !== fallback) {
-      setActiveView({ name: fallback });
+      setActiveView({ name: defaultViewForSection(fallback) });
     }
   }, [activeView.name, currentUser, userPermissions]);
 
@@ -260,6 +285,7 @@ function MainApp() {
     setCurrentUser(null);
     setMaterials([]);
     setProducts([]);
+    setBatches([]);
     setSettings(null);
     setActiveView({ name: 'home' });
   }
@@ -271,15 +297,23 @@ function MainApp() {
   }
 
   const title = useMemo(() => {
-    if (activeView.name === 'materials') return 'Raw Materials';
+    if (activeView.name === 'materials') return 'Raw Materials Supplier';
+    if (activeView.name === 'production-materials') return 'Production Raw Materials';
     if (activeView.name === 'products') return 'Products';
+    if (activeView.name === 'batches') return 'Batch Production';
     if (activeView.name === 'settings') return 'Settings';
     if (activeView.name === 'material-new') return 'Add Raw Material';
     if (activeView.name === 'material-detail') return 'Raw Material Detail';
     if (activeView.name === 'material-edit') return 'Edit Raw Material';
+    if (activeView.name === 'production-material-new') return 'Add Production Raw Material';
+    if (activeView.name === 'production-material-detail') return 'Production Raw Material Detail';
+    if (activeView.name === 'production-material-edit') return 'Edit Production Raw Material';
     if (activeView.name === 'product-new') return 'Product Builder';
     if (activeView.name === 'product-detail') return 'Product Detail';
     if (activeView.name === 'product-edit') return 'Edit Product';
+    if (activeView.name === 'batch-new') return 'Batch Builder';
+    if (activeView.name === 'batch-detail') return 'Batch Detail';
+    if (activeView.name === 'batch-edit') return 'Edit Batch';
     return 'Home';
   }, [activeView.name]);
 
@@ -299,6 +333,7 @@ function MainApp() {
     productSearchScope,
     materials,
     products,
+    batches,
     settings,
     currentUser,
     permissions: userPermissions,
@@ -775,6 +810,22 @@ function FormulaSettingsPanel({ settings, multiplier, setMultiplier, onSave }) {
         <strong>Ingredients Cost</strong>
         <p>Ingredients Cost is the sum of all ingredient portions in a product, based on each raw material cost and the relative quantity used.</p>
       </div>
+      <div className="formula-reference">
+        <strong>Ingredient Weight</strong>
+        <p>Ingredient Weight is the total starting weight of ingredients that resolve to g or kg. Final Weight is the measured yield after cooking or production, and may be N/A.</p>
+      </div>
+      <div className="formula-reference">
+        <strong>Production Raw Material Cost</strong>
+        <p>Production material cost is the sum of its recipe ingredient costs divided by the final yield, displayed as cost per 100g and 1kg.</p>
+      </div>
+      <div className="formula-reference">
+        <strong>Vision</strong>
+        <p>Vision values scale the main product by desired servings divided by saved product servings, then apply the same total cost multiplier.</p>
+      </div>
+      <div className="formula-reference">
+        <strong>Batch Production</strong>
+        <p>Batch total uses the full batch recipe. Per-unit values are batch totals divided by the quantity made.</p>
+      </div>
     </section>
   );
 }
@@ -1021,27 +1072,39 @@ function ViewRouter({ context }) {
 
   if (!canView(section)) return <AccessDenied section={section} />;
   if (['material-new', 'material-edit'].includes(activeView.name) && !canEdit('materials')) return <AccessDenied section="materials" mode="edit" />;
+  if (['production-material-new', 'production-material-edit'].includes(activeView.name) && !canEdit('productionMaterials')) return <AccessDenied section="productionMaterials" mode="edit" />;
   if (['product-new', 'product-edit'].includes(activeView.name) && !canEdit('products')) return <AccessDenied section="products" mode="edit" />;
+  if (['batch-new', 'batch-edit'].includes(activeView.name) && !canEdit('batches')) return <AccessDenied section="batches" mode="edit" />;
 
   if (activeView.name === 'materials') return <RawMaterialsView {...context} />;
   if (activeView.name === 'material-new') return <RawMaterialForm {...context} mode="create" />;
   if (activeView.name === 'material-detail') return <RawMaterialDetail {...context} id={activeView.id} />;
   if (activeView.name === 'material-edit') return <RawMaterialForm {...context} mode="edit" id={activeView.id} />;
+  if (activeView.name === 'production-materials') return <ProductionMaterialsView {...context} />;
+  if (activeView.name === 'production-material-new') return <RawMaterialForm {...context} mode="create" sourceType="production" />;
+  if (activeView.name === 'production-material-detail') return <RawMaterialDetail {...context} id={activeView.id} returnView="production-materials" />;
+  if (activeView.name === 'production-material-edit') return <RawMaterialForm {...context} mode="edit" id={activeView.id} sourceType="production" />;
   if (activeView.name === 'products') return <ProductsView {...context} />;
   if (activeView.name === 'product-new') return <ProductForm {...context} mode="create" />;
   if (activeView.name === 'product-detail') return <ProductDetail {...context} id={activeView.id} />;
   if (activeView.name === 'product-edit') return <ProductForm {...context} mode="edit" id={activeView.id} />;
+  if (activeView.name === 'batches') return <BatchProductionView {...context} />;
+  if (activeView.name === 'batch-new') return <BatchForm {...context} mode="create" />;
+  if (activeView.name === 'batch-detail') return <BatchDetail {...context} id={activeView.id} />;
+  if (activeView.name === 'batch-edit') return <BatchForm {...context} mode="edit" id={activeView.id} />;
   if (activeView.name === 'settings') return <SettingsView {...context} />;
   return <HomeView {...context} />;
 }
 
 function Sidebar({ activeView, canView, canEdit, collapsed, onToggleCollapsed, onNavigate, onNewProduct, mobileOpen, onClose }) {
   const nav = [
-    { id: 'home', label: 'Home', icon: Home },
-    { id: 'materials', label: 'Raw Materials', icon: Wheat },
-    { id: 'products', label: 'Products', icon: Cake },
-    { id: 'settings', label: 'Settings', icon: Settings }
-  ].filter((item) => canView(item.id));
+    { view: 'home', section: 'home', label: 'Home', icon: Home },
+    { view: 'materials', section: 'materials', label: 'Supplier Materials', icon: Wheat },
+    { view: 'production-materials', section: 'productionMaterials', label: 'Production Materials', icon: Calculator },
+    { view: 'products', section: 'products', label: 'Products', icon: Cake },
+    { view: 'batches', section: 'batches', label: 'Batch Production', icon: Calculator },
+    { view: 'settings', section: 'settings', label: 'Settings', icon: Settings }
+  ].filter((item) => canView(item.section));
 
   return (
     <>
@@ -1063,9 +1126,9 @@ function Sidebar({ activeView, canView, canEdit, collapsed, onToggleCollapsed, o
         <nav className="nav-list">
           {nav.map((item) => {
             const Icon = item.icon;
-            const active = activeView === item.id || (activeView.startsWith(item.id.slice(0, -1)) && item.id !== 'home');
+            const active = activeView === item.view || (activeView.startsWith(item.view.slice(0, -1)) && item.view !== 'home');
             return (
-              <button key={item.id} className={`nav-item ${active ? 'active' : ''}`} onClick={() => onNavigate(item.id)}>
+              <button key={item.view} className={`nav-item ${active ? 'active' : ''}`} onClick={() => onNavigate(item.view)}>
                 <Icon size={20} />
                 <span>{item.label}</span>
               </button>
@@ -1136,8 +1199,10 @@ function Header({ title, searchQuery, onSearchChange, searchScope, onSearchScope
   );
 }
 
-function HomeView({ setActiveView, materials, products, canView, canEdit }) {
+function HomeView({ setActiveView, materials, products, batches, canView, canEdit }) {
   const [greeting] = useState(() => homeGreetings[Math.floor(Math.random() * homeGreetings.length)]);
+  const supplierMaterials = materials.filter((material) => material.sourceType !== 'production');
+  const productionMaterials = materials.filter((material) => material.sourceType === 'production');
 
   return (
     <div className="page-stack">
@@ -1150,10 +1215,19 @@ function HomeView({ setActiveView, materials, products, canView, canEdit }) {
         {canView('materials') && (
           <ActionCard
             icon={Wheat}
-            eyebrow="Raw Materials"
-            title={`${materials.length} Cost References`}
-            text="Manage base costs, units, and custom food conversions."
+            eyebrow="Supplier Materials"
+            title={`${supplierMaterials.length} Cost References`}
+            text="Manage supplier, brand, material names, units, and costs."
             onClick={() => setActiveView({ name: 'materials' })}
+          />
+        )}
+        {canView('productionMaterials') && (
+          <ActionCard
+            icon={Calculator}
+            eyebrow="Production Materials"
+            title={`${productionMaterials.length} Recipes`}
+            text="Create factory-made materials that can be reused in products."
+            onClick={() => setActiveView({ name: 'production-materials' })}
           />
         )}
         {canView('products') && (
@@ -1163,6 +1237,15 @@ function HomeView({ setActiveView, materials, products, canView, canEdit }) {
             title={`${products.length} Products Costed`}
             text="Build products from raw materials and see live totals."
             onClick={() => setActiveView({ name: 'products' })}
+          />
+        )}
+        {canView('batches') && (
+          <ActionCard
+            icon={Calculator}
+            eyebrow="Batch Production"
+            title={`${batches.length} Batches`}
+            text="Calculate large production runs without changing products."
+            onClick={() => setActiveView({ name: 'batches' })}
           />
         )}
       </section>
@@ -1194,23 +1277,51 @@ function ActionCard({ icon: Icon, eyebrow, title, text, onClick }) {
 
 function RawMaterialsView({ materials, searchQuery, setActiveView, canEdit }) {
   const [sortMode, setSortMode] = useState('default');
-  const filtered = sortItems(filterByName(materials, searchQuery), sortMode);
+  const supplierMaterials = materials.filter((material) => material.sourceType !== 'production');
+  const filtered = sortItems(filterByName(supplierMaterials, searchQuery), sortMode);
   const canEditMaterials = canEdit('materials');
 
   return (
     <div className="page-stack">
       <PageTitle
         title="Raw Materials"
-        subtitle="Cost references used by products. These do not track stock."
+        subtitle="Supplier, brand, and material cost references used by production and products."
         action={canEditMaterials ? <button className="primary-button" onClick={() => setActiveView({ name: 'material-new' })}><Plus size={18} />Add Raw Material</button> : <span className="readonly-pill">Read only</span>}
       />
       <ListArrangeControl sortMode={sortMode} setSortMode={setSortMode} />
       {filtered.length === 0 ? (
-        <EmptyState title="No raw materials yet" text="Add flour, sugar, eggs, or any material you use to make products." actionLabel={canEditMaterials ? 'Add Raw Material' : undefined} onAction={canEditMaterials ? () => setActiveView({ name: 'material-new' }) : undefined} />
+        <EmptyState title="No supplier raw materials yet" text="Add the supplier materials you buy directly." actionLabel={canEditMaterials ? 'Add Raw Material' : undefined} onAction={canEditMaterials ? () => setActiveView({ name: 'material-new' }) : undefined} />
       ) : (
         <div className="card-grid">
           {filtered.map((material) => (
             <RawMaterialCard key={material.id} material={material} onClick={() => setActiveView({ name: 'material-detail', id: material.id })} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductionMaterialsView({ materials, searchQuery, setActiveView, canEdit }) {
+  const [sortMode, setSortMode] = useState('default');
+  const productionMaterials = materials.filter((material) => material.sourceType === 'production');
+  const filtered = sortItems(filterByName(productionMaterials, searchQuery), sortMode);
+  const canEditProduction = canEdit('productionMaterials');
+
+  return (
+    <div className="page-stack">
+      <PageTitle
+        title="Production Raw Materials"
+        subtitle="Factory-made raw materials calculated from supplier and production ingredients."
+        action={canEditProduction ? <button className="primary-button" onClick={() => setActiveView({ name: 'production-material-new' })}><Plus size={18} />Add Production Material</button> : <span className="readonly-pill">Read only</span>}
+      />
+      <ListArrangeControl sortMode={sortMode} setSortMode={setSortMode} extended />
+      {filtered.length === 0 ? (
+        <EmptyState title="No production raw materials yet" text="Create whipping cream, fillings, mixes, or any material made in-house." actionLabel={canEditProduction ? 'Add Production Material' : undefined} onAction={canEditProduction ? () => setActiveView({ name: 'production-material-new' }) : undefined} />
+      ) : (
+        <div className="card-grid">
+          {filtered.map((material) => (
+            <RawMaterialCard key={material.id} material={material} onClick={() => setActiveView({ name: 'production-material-detail', id: material.id })} />
           ))}
         </div>
       )}
@@ -1255,10 +1366,10 @@ function RawMaterialCostSummary({ material }) {
   );
 }
 
-function RawMaterialDetail({ id, materials, setActiveView, afterMutation, setError, canEdit }) {
+function RawMaterialDetail({ id, materials, setActiveView, afterMutation, setError, canEdit, returnView = 'materials' }) {
   const material = materials.find((item) => item.id === id);
-  if (!material) return <MissingView label="raw material" onBack={() => setActiveView({ name: 'materials' })} />;
-  const canEditMaterials = canEdit('materials');
+  if (!material) return <MissingView label="raw material" onBack={() => setActiveView({ name: returnView })} />;
+  const canEditMaterials = canEdit(material.sourceType === 'production' ? 'productionMaterials' : 'materials');
   const displayCost = rawMaterialDisplayCost(material);
 
   async function remove() {
@@ -1267,12 +1378,12 @@ function RawMaterialDetail({ id, materials, setActiveView, afterMutation, setErr
       setError(result.error.message);
       return;
     }
-    await afterMutation({ name: 'materials' });
+    await afterMutation({ name: returnView });
   }
 
   return (
     <div className="page-stack">
-      <BackButton onClick={() => setActiveView({ name: 'materials' })} />
+      <BackButton onClick={() => setActiveView({ name: returnView })} />
       <div className="detail-panel">
         <div>
           <span className="eyebrow">{material.id}</span>
@@ -1281,11 +1392,32 @@ function RawMaterialDetail({ id, materials, setActiveView, afterMutation, setErr
         </div>
         {canEditMaterials ? (
           <div className="button-row">
-            <button className="secondary-button" onClick={() => setActiveView({ name: 'material-edit', id: material.id })}><Pencil size={16} />Edit</button>
+            <button className="secondary-button" onClick={() => setActiveView({ name: material.sourceType === 'production' ? 'production-material-edit' : 'material-edit', id: material.id })}><Pencil size={16} />Edit</button>
             <button className="danger-button" onClick={remove}><Trash2 size={16} />Delete</button>
           </div>
         ) : <span className="readonly-pill">Read only</span>}
       </div>
+      {material.sourceType === 'production' && (
+        <InfoPanel title="Production Yield">
+          <CostLine label="Ingredient weight" value={formatWeightGrams(material.ingredientWeightGrams)} />
+          <CostLine label="Final weight" value={formatOptionalWeight(material.finalWeight)} />
+          <CostLine label="USD / 100g" value={`$${formatUsd(Number(material.costPerBaseUnitUSD ?? 0) * (material.baseUnit === 'kg' ? 0.1 : 100))}`} />
+          <CostLine label="USD / 1kg" value={`$${formatUsd(Number(material.costPerBaseUnitUSD ?? 0) * (material.baseUnit === 'kg' ? 1 : 1000))}`} />
+        </InfoPanel>
+      )}
+      {material.sourceType === 'production' && (
+        <InfoPanel title="Production Ingredients">
+          <div className="table-list">
+            {(material.ingredients ?? []).map((ingredient, index) => (
+              <div className="table-row" key={`${ingredient.rawMaterialId}-${index}`}>
+                <span>{materialNameForId(materials, ingredient.rawMaterialId)}</span>
+                <span>{ingredient.quantity} {ingredient.unit}</span>
+                <strong>${formatUsd(ingredient.portionCostUSD)}</strong>
+              </div>
+            ))}
+          </div>
+        </InfoPanel>
+      )}
       <div className="two-column">
         <InfoPanel title="Purchase">
           <CostLine label="Bought quantity" value={`${material.purchaseQuantity} ${material.purchaseUnit}`} />
@@ -1312,16 +1444,25 @@ function RawMaterialDetail({ id, materials, setActiveView, afterMutation, setErr
   );
 }
 
-function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, setError }) {
+function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, setError, sourceType = 'supplier' }) {
   const existing = materials.find((item) => item.id === id);
-  const [form, setForm] = useState(() => existing ? materialToForm(existing) : emptyRawMaterialForm);
+  const [form, setForm] = useState(() => existing ? materialToForm(existing) : { ...emptyRawMaterialForm, sourceType, ingredients: [{ rawMaterialId: '', quantity: '', unit: '' }], finalWeight: { quantity: '', unit: 'g' } });
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [ingredientSearch, setIngredientSearch] = useState('');
+  const isProduction = form.sourceType === 'production';
+
+  useEffect(() => {
+    if (!isProduction) return;
+    setForm((current) => ensureTrailingEmptyRow(current));
+  }, [isProduction, form.ingredients?.length]);
 
   useEffect(() => {
     let cancelled = false;
     async function calculate() {
-      if (!api || !form.name || !form.purchaseQuantity || form.purchasePrice === '') {
+      const canCalculateSupplier = !isProduction && (form.name || (form.supplier && form.brand && form.materialName)) && form.purchaseQuantity && form.purchasePrice !== '';
+      const canCalculateProduction = isProduction && form.name && form.finalWeight?.quantity;
+      if (!api || (!canCalculateSupplier && !canCalculateProduction)) {
         setDraft(null);
         return;
       }
@@ -1344,21 +1485,25 @@ function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, se
       setError(result.error.message);
       return;
     }
-    await afterMutation({ name: 'material-detail', id: result.data.id });
+    await afterMutation({ name: result.data.sourceType === 'production' ? 'production-material-detail' : 'material-detail', id: result.data.id });
   }
+
+  const ingredientRows = isProduction ? filterProductFormIngredients(form.ingredients ?? [], materials.filter((material) => material.id !== id), ingredientSearch) : [];
 
   return (
     <form className="page-stack form-page" onSubmit={submit}>
-      <BackButton onClick={() => setActiveView(mode === 'edit' ? { name: 'material-detail', id } : { name: 'materials' })} />
+      <BackButton onClick={() => setActiveView(mode === 'edit' ? { name: isProduction ? 'production-material-detail' : 'material-detail', id } : { name: isProduction ? 'production-materials' : 'materials' })} />
       <PageTitle
-        title={mode === 'edit' ? 'Edit Raw Material' : 'Add Raw Material'}
-        subtitle="Enter the bought quantity and price. The app shows useful cost references for purchasing and display."
+        title={mode === 'edit' ? (isProduction ? 'Edit Production Raw Material' : 'Edit Raw Material') : (isProduction ? 'Add Production Raw Material' : 'Add Raw Material')}
+        subtitle={isProduction ? 'Build an in-house raw material from supplier or production ingredients.' : 'Enter supplier, brand, material, bought quantity, and price.'}
         action={<button type="submit" className="primary-button" disabled={saving}><Save size={18} />{saving ? 'Saving...' : 'Save Raw Material'}</button>}
       />
-      <div className="raw-material-layout">
+      {!isProduction ? <div className="raw-material-layout">
         <InfoPanel title="Ingredient">
           <div className="compact-form-grid">
-            <TextField label="Name" value={form.name} onChange={(value) => setFormValue(setForm, 'name', value)} placeholder="Flour" />
+            <TextField label="Supplier" value={form.supplier} onChange={(value) => setFormValue(setForm, 'supplier', value)} placeholder="Supplier name" />
+            <TextField label="Brand" value={form.brand} onChange={(value) => setFormValue(setForm, 'brand', value)} placeholder="Brand" />
+            <TextField label="Material" value={form.materialName} onChange={(value) => setFormValue(setForm, 'materialName', value)} placeholder="Flour" />
             <SelectField label="Base Unit" value={form.baseUnit} onChange={(value) => setFormValue(setForm, 'baseUnit', value)} options={unitOptions()} />
             <TextField label="Bought Quantity" type="number" value={form.purchaseQuantity} onChange={(value) => setFormValue(setForm, 'purchaseQuantity', value)} />
             <SelectField label="Bought Unit" value={form.purchaseUnit} onChange={(value) => setFormValue(setForm, 'purchaseUnit', value)} options={[...unitOptions(), ...customUnitOptions()]} />
@@ -1371,9 +1516,53 @@ function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, se
           </div>
           {draft?.ok && <RawMaterialCostSummary material={draft.data} />}
         </InfoPanel>
-      </div>
+      </div> : (
+        <div className="builder-layout">
+          <div className="builder-main">
+            <InfoPanel title="Production Material">
+              <div className="compact-form-grid">
+                <TextField label="Name" value={form.name} onChange={(value) => setFormValue(setForm, 'name', value)} placeholder="Whipping Cream X" />
+                <SelectField label="Base Unit" value={form.baseUnit} onChange={(value) => setFormValue(setForm, 'baseUnit', value)} options={[['g', 'g'], ['kg', 'kg']]} />
+                <TextField label="Final Weight" type="number" value={form.finalWeight?.quantity} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'quantity', value)} />
+                <SelectField label="Final Unit" value={form.finalWeight?.unit} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'unit', value)} options={[['g', 'g'], ['kg', 'kg']]} />
+              </div>
+            </InfoPanel>
+            <InfoPanel title="Ingredients">
+              <IngredientSearchBar value={ingredientSearch} onChange={setIngredientSearch} placeholder="Search raw materials to add" />
+              <div className="ingredient-list">
+                {ingredientRows.map(({ ingredient, index }) => (
+                  <IngredientRow
+                    key={index}
+                    ingredient={ingredient}
+                    materials={materials.filter((material) => material.id !== id)}
+                    selectedMaterialIds={(form.ingredients ?? []).map((item, itemIndex) => itemIndex === index ? null : item.rawMaterialId).filter(Boolean)}
+                    materialSearchQuery={ingredientSearch}
+                    onChange={(next) => updateIngredient(setForm, index, next)}
+                    onRemove={() => removeIngredient(setForm, index)}
+                    portionCost={draft?.ok ? draft.data.ingredients.find((item) => item.rawMaterialId === ingredient.rawMaterialId)?.portionCostUSD : null}
+                  />
+                ))}
+              </div>
+            </InfoPanel>
+          </div>
+          <aside className="builder-summary">
+            <div className="summary-card">
+              <span>Ingredient Weight</span>
+              <strong>{formatWeightGrams(draft?.ok ? draft.data.ingredientWeightGrams : 0)}</strong>
+            </div>
+            <div className="summary-card total-card">
+              <span>Production Cost</span>
+              <strong>${formatUsd(draft?.ok ? draft.data.purchasePriceUSD : 0)}</strong>
+              <p>{Math.round(draft?.ok ? draft.data.purchasePriceLBP : 0).toLocaleString()} LBP</p>
+            </div>
+            {draft?.ok && <RawMaterialCostSummary material={draft.data} />}
+            {draft && !draft.ok && <Notice type="warning" message={draft.error.message} />}
+            <button className="primary-button full" disabled={saving}><Save size={18} />{saving ? 'Saving...' : 'Save Raw Material'}</button>
+          </aside>
+        </div>
+      )}
 
-      <InfoPanel title="Optional food conversions">
+      {!isProduction && <InfoPanel title="Optional food conversions">
         <div className="liquid-preset-row">
           <SelectField
             label="Conversion mode"
@@ -1395,7 +1584,7 @@ function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, se
             <ConversionFields key={unit} unit={unit} form={form} setForm={setForm} />
           ))}
         </div>
-      </InfoPanel>
+      </InfoPanel>}
       <label className="field full-field">
         <span>Notes</span>
         <textarea value={form.notes} onChange={(event) => setFormValue(setForm, 'notes', event.target.value)} rows={3} />
@@ -1408,7 +1597,9 @@ function RawMaterialForm({ mode, id, materials, setActiveView, afterMutation, se
 
 function ProductsView({ products, materials, searchQuery, productSearchScope, setActiveView, canEdit }) {
   const [sortMode, setSortMode] = useState('default');
-  const filtered = sortItems(filterProducts(products, materials, searchQuery, productSearchScope), sortMode);
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const filtered = sortItems(filterProducts(products, materials, searchQuery, productSearchScope)
+    .filter((product) => categoryFilter === 'all' || product.category === categoryFilter), sortMode);
   const canEditProducts = canEdit('products');
 
   return (
@@ -1418,7 +1609,18 @@ function ProductsView({ products, materials, searchQuery, productSearchScope, se
         subtitle="Products are calculated from the latest raw material costs."
         action={canEditProducts ? <button className="primary-button" onClick={() => setActiveView({ name: 'product-new' })}><Plus size={18} />Create Product</button> : <span className="readonly-pill">Read only</span>}
       />
-      <ListArrangeControl sortMode={sortMode} setSortMode={setSortMode} />
+      <div className="product-controls">
+        <ListArrangeControl sortMode={sortMode} setSortMode={setSortMode} extended />
+        <label className="compact-select">
+          <span>Filter</span>
+          <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+            <option value="all">All</option>
+            <option value="piece">Pieces</option>
+            <option value="cake">Cakes</option>
+            <option value="box">Boxes</option>
+          </select>
+        </label>
+      </div>
       {filtered.length === 0 ? (
         <EmptyState title="No products yet" text="Create a product and add raw materials to calculate total production cost." actionLabel={canEditProducts ? 'Create Product' : undefined} onAction={canEditProducts ? () => setActiveView({ name: 'product-new' }) : undefined} />
       ) : (
@@ -1429,7 +1631,7 @@ function ProductsView({ products, materials, searchQuery, productSearchScope, se
                 <div className="card-icon"><Cake size={22} /></div>
                 <div>
                   <h3>{product.name}</h3>
-                  <span>{product.ingredientCount ?? product.ingredients.length} ingredients</span>
+                  <span>{productCategoryLabel(product.category)} · {product.ingredientCount ?? product.ingredients.length} ingredients</span>
                 </div>
               </div>
               <div className="cost-lines">
@@ -1445,19 +1647,23 @@ function ProductsView({ products, materials, searchQuery, productSearchScope, se
   );
 }
 
-function ListArrangeControl({ sortMode, setSortMode }) {
+function ListArrangeControl({ sortMode, setSortMode, extended = false }) {
   return (
-    <div className="product-controls">
-      <label className="compact-select">
-        <span>Arrange</span>
-        <select value={sortMode} onChange={(event) => setSortMode(event.target.value)}>
-          <option value="default">Default</option>
-          <option value="alphabetical">Alphabetical</option>
-          <option value="newest">Newest</option>
-          <option value="oldest">Oldest</option>
-        </select>
-      </label>
-    </div>
+    <label className="compact-select">
+      <span>Arrange</span>
+      <select value={sortMode} onChange={(event) => setSortMode(event.target.value)}>
+        <option value="default">Default</option>
+        <option value="alphabetical">Alphabetical</option>
+        <option value="newest">Newest</option>
+        <option value="oldest">Oldest</option>
+        {extended && <option value="cost-asc">Increasing cost</option>}
+        {extended && <option value="cost-desc">Decreasing cost</option>}
+        {extended && <option value="weight-asc">Increasing weight</option>}
+        {extended && <option value="weight-desc">Decreasing weight</option>}
+        {extended && <option value="final-weight-asc">Increasing final weight</option>}
+        {extended && <option value="final-weight-desc">Decreasing final weight</option>}
+      </select>
+    </label>
   );
 }
 
@@ -1493,6 +1699,9 @@ function ProductDetail({ id, setActiveView, afterMutation, setError, canEdit }) 
         <div>
           <span className="eyebrow">{product.id}</span>
           <h2>{product.name}</h2>
+          <p>{productCategoryLabel(product.category)}{product.servingCount ? ` · ${product.servingCount} servings` : ''}</p>
+          <p>Ingredient weight: {formatWeightGrams(product.ingredientWeightGrams)}</p>
+          <p>Final weight: {formatOptionalWeight(product.finalWeight)}</p>
           <p>Ingredient cost: ${formatUsd(product.ingredientCostUSD)} / {Math.round(product.ingredientCostLBP).toLocaleString()} LBP</p>
           <p>Total cost: ${formatUsd(product.totalCostUSD)} / {Math.round(product.totalCostLBP).toLocaleString()} LBP</p>
         </div>
@@ -1517,6 +1726,22 @@ function ProductDetail({ id, setActiveView, afterMutation, setError, canEdit }) 
           ))}
         </div>
       </InfoPanel>
+      {(product.visions ?? []).length > 0 && (
+        <InfoPanel title="Visions">
+          <div className="vision-list">
+            {product.visions.map((vision, index) => (
+              <div className="formula-card" key={`${vision.servingCount}-${index}`}>
+                <div>
+                  <span className="eyebrow">Vision {vision.servingCount}</span>
+                  <h3>{vision.servingCount} servings</h3>
+                  <p>Ingredient weight: {formatWeightGrams(vision.ingredientWeightGrams)}</p>
+                  <p>Ingredient cost: ${formatUsd(vision.ingredientCostUSD)} / Total cost: ${formatUsd(vision.totalCostUSD)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </InfoPanel>
+      )}
     </div>
   );
 }
@@ -1572,7 +1797,13 @@ function ProductForm({ mode, id, products, materials, setActiveView, afterMutati
       <div className="builder-layout">
         <div className="builder-main">
           <InfoPanel title="Product">
-            <TextField label="Product Name" value={form.name} onChange={(value) => setFormValue(setForm, 'name', value)} placeholder="Chocolate Cake" />
+            <div className="compact-form-grid">
+              <TextField label="Product Name" value={form.name} onChange={(value) => setFormValue(setForm, 'name', value)} placeholder="Chocolate Cake" />
+              <SelectField label="Category" value={form.category} onChange={(value) => setFormValue(setForm, 'category', value)} options={productCategoryOptions()} />
+              <TextField label="Servings" type="number" value={form.servingCount} onChange={(value) => setFormValue(setForm, 'servingCount', value)} />
+              <TextField label="Final Weight" type="number" value={form.finalWeight?.quantity} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'quantity', value)} />
+              <SelectField label="Final Unit" value={form.finalWeight?.unit} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'unit', value)} options={[['g', 'g'], ['kg', 'kg']]} />
+            </div>
           </InfoPanel>
           <InfoPanel title="Ingredients">
             <IngredientSearchBar value={ingredientSearch} onChange={setIngredientSearch} placeholder="Search raw materials to add" />
@@ -1594,8 +1825,24 @@ function ProductForm({ mode, id, products, materials, setActiveView, afterMutati
               ))}
             </div>
           </InfoPanel>
+          <InfoPanel title="Vision">
+            <p className="muted">Optional serving-size scenarios shown on the product profile only.</p>
+            <div className="vision-edit-list">
+              {(form.visions ?? []).map((vision, index) => (
+                <div className="ingredient-row" key={index}>
+                  <TextField label="Vision servings" type="number" value={vision.servingCount} onChange={(value) => updateVision(setForm, index, { servingCount: value })} />
+                  <button type="button" className="icon-button danger-text" onClick={() => removeVision(setForm, index)} aria-label="Remove vision"><Trash2 size={17} /></button>
+                </div>
+              ))}
+              <button type="button" className="secondary-button fit-button" onClick={() => addVision(setForm)}><Plus size={16} />Add Vision</button>
+            </div>
+          </InfoPanel>
         </div>
         <aside className="builder-summary">
+          <div className="summary-card">
+            <span>Ingredient Weight</span>
+            <strong>{formatWeightGrams(draft?.ok ? draft.data.ingredientWeightGrams : 0)}</strong>
+          </div>
           <div className="summary-card">
             <span>Ingredient Cost</span>
             <strong>${formatUsd(draft?.ok ? draft.data.ingredientCostUSD : 0)}</strong>
@@ -1608,6 +1855,209 @@ function ProductForm({ mode, id, products, materials, setActiveView, afterMutati
           </div>
           {draft && !draft.ok && <Notice type="warning" message={draft.error.message} />}
           <button className="primary-button full" disabled={saving}><Save size={18} />{saving ? 'Saving...' : 'Save Product'}</button>
+        </aside>
+      </div>
+    </form>
+  );
+}
+
+function BatchProductionView({ batches, searchQuery, setActiveView, canEdit }) {
+  const [sortMode, setSortMode] = useState('default');
+  const filtered = sortItems(filterByName(batches, searchQuery), sortMode);
+  const canEditBatches = canEdit('batches');
+
+  return (
+    <div className="page-stack">
+      <PageTitle
+        title="Batch Production"
+        subtitle="Calculate large runs separately from saved products."
+        action={canEditBatches ? <button className="primary-button" onClick={() => setActiveView({ name: 'batch-new' })}><Plus size={18} />Create Batch</button> : <span className="readonly-pill">Read only</span>}
+      />
+      <ListArrangeControl sortMode={sortMode} setSortMode={setSortMode} extended />
+      {filtered.length === 0 ? (
+        <EmptyState title="No batches yet" text="Create a production batch to compare total run cost and per-unit cost." actionLabel={canEditBatches ? 'Create Batch' : undefined} onAction={canEditBatches ? () => setActiveView({ name: 'batch-new' }) : undefined} />
+      ) : (
+        <div className="card-grid">
+          {filtered.map((batch) => (
+            <button key={batch.id} className="material-card" onClick={() => setActiveView({ name: 'batch-detail', id: batch.id })}>
+              <div className="material-card-head">
+                <div className="card-icon"><Calculator size={22} /></div>
+                <div>
+                  <h3>{batch.name}</h3>
+                  <span>{batch.batchQuantity} units · {batch.servingCount ?? 'N/A'} servings each</span>
+                </div>
+              </div>
+              <div className="cost-lines">
+                <CostLine label="Batch Total" value={`$${formatUsd(batch.totalCostUSD)}`} />
+                <CostLine label="Per Unit Total" value={`$${formatUsd(batch.perUnit?.totalCostUSD)}`} />
+                <CostLine label="Batch Weight" value={formatWeightGrams(batch.ingredientWeightGrams)} />
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BatchDetail({ id, materials, setActiveView, afterMutation, setError, canEdit }) {
+  const [batch, setBatch] = useState(null);
+  const canEditBatches = canEdit('batches');
+
+  useEffect(() => {
+    api.getBatch(id).then((result) => {
+      if (result.ok) setBatch(result.data);
+      else setError(result.error.message);
+    });
+  }, [id]);
+
+  async function remove() {
+    const result = await api.deleteBatch(id);
+    if (!result.ok) {
+      setError(result.error.message);
+      return;
+    }
+    await afterMutation({ name: 'batches' });
+  }
+
+  if (!batch) return <Loading />;
+
+  return (
+    <div className="page-stack">
+      <BackButton onClick={() => setActiveView({ name: 'batches' })} />
+      <div className="detail-panel dark-panel">
+        <div>
+          <span className="eyebrow">{batch.id}</span>
+          <h2>{batch.name}</h2>
+          <p>{batch.batchQuantity} units · {batch.servingCount ?? 'N/A'} servings per unit</p>
+          <p>Batch ingredient weight: {formatWeightGrams(batch.ingredientWeightGrams)}</p>
+          <p>Batch final weight: {formatOptionalWeight(batch.finalWeight)}</p>
+          <p>Batch total cost: ${formatUsd(batch.totalCostUSD)}</p>
+        </div>
+        {canEditBatches ? (
+          <div className="button-row">
+            <button className="secondary-button light" onClick={() => setActiveView({ name: 'batch-edit', id })}><Pencil size={16} />Edit</button>
+            <button className="danger-button" onClick={remove}><Trash2 size={16} />Delete</button>
+          </div>
+        ) : <span className="readonly-pill light">Read only</span>}
+      </div>
+      <div className="two-column">
+        <InfoPanel title="Batch Total">
+          <CostLine label="Ingredient cost" value={`$${formatUsd(batch.ingredientCostUSD)}`} />
+          <CostLine label="Total cost" value={`$${formatUsd(batch.totalCostUSD)}`} />
+          <CostLine label="Ingredient weight" value={formatWeightGrams(batch.ingredientWeightGrams)} />
+          <CostLine label="Final weight" value={formatOptionalWeight(batch.finalWeight)} />
+        </InfoPanel>
+        <InfoPanel title="Per Unit">
+          <CostLine label="Ingredient cost" value={`$${formatUsd(batch.perUnit?.ingredientCostUSD)}`} />
+          <CostLine label="Total cost" value={`$${formatUsd(batch.perUnit?.totalCostUSD)}`} />
+          <CostLine label="Ingredient weight" value={formatWeightGrams(batch.perUnit?.ingredientWeightGrams)} />
+          <CostLine label="Final weight" value={formatOptionalWeight(batch.perUnit?.finalWeight)} />
+        </InfoPanel>
+      </div>
+      <InfoPanel title="Batch Ingredients">
+        <div className="table-list">
+          {(batch.ingredients ?? []).map((ingredient, index) => (
+            <div className="table-row" key={`${ingredient.rawMaterialId}-${index}`}>
+              <span>{ingredient.rawMaterialName ?? materialNameForId(materials, ingredient.rawMaterialId)}</span>
+              <span>{ingredient.quantity} {ingredient.unit}</span>
+              <strong>${formatUsd(ingredient.portionCostUSD)}</strong>
+            </div>
+          ))}
+        </div>
+      </InfoPanel>
+    </div>
+  );
+}
+
+function BatchForm({ mode, id, batches, materials, setActiveView, afterMutation, setError }) {
+  const existing = batches.find((item) => item.id === id);
+  const [form, setForm] = useState(() => existing ? batchToForm(existing) : emptyBatchForm);
+  const [draft, setDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [ingredientSearch, setIngredientSearch] = useState('');
+
+  useEffect(() => {
+    setForm((current) => ensureTrailingEmptyRow(current));
+  }, [form.ingredients.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function calculate() {
+      if (!api || !form.name || !form.batchQuantity) {
+        setDraft(null);
+        return;
+      }
+      const result = await api.calculateBatchDraft(form);
+      if (!cancelled) setDraft(result);
+    }
+    calculate();
+    return () => { cancelled = true; };
+  }, [form]);
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    const result = mode === 'edit' ? await api.updateBatch(id, form) : await api.createBatch(form);
+    setSaving(false);
+    if (!result.ok) {
+      setError(result.error.message);
+      return;
+    }
+    await afterMutation({ name: 'batch-detail', id: result.data.id });
+  }
+
+  const ingredientRows = filterProductFormIngredients(form.ingredients, materials, ingredientSearch);
+
+  return (
+    <form className="page-stack" onSubmit={submit}>
+      <BackButton onClick={() => setActiveView(mode === 'edit' ? { name: 'batch-detail', id } : { name: 'batches' })} />
+      <PageTitle
+        title={mode === 'edit' ? 'Edit Batch' : 'Batch Builder'}
+        subtitle="Calculate a production run and see the per-unit result below it."
+        action={<button type="submit" className="primary-button" disabled={saving}><Save size={18} />{saving ? 'Saving...' : 'Save Batch'}</button>}
+      />
+      <div className="builder-layout">
+        <div className="builder-main">
+          <InfoPanel title="Batch">
+            <div className="compact-form-grid">
+              <TextField label="Product Name" value={form.name} onChange={(value) => setFormValue(setForm, 'name', value)} placeholder="Red Velvet" />
+              <SelectField label="Category" value={form.category} onChange={(value) => setFormValue(setForm, 'category', value)} options={productCategoryOptions()} />
+              <TextField label="Servings per unit" type="number" value={form.servingCount} onChange={(value) => setFormValue(setForm, 'servingCount', value)} />
+              <TextField label="Quantity made" type="number" value={form.batchQuantity} onChange={(value) => setFormValue(setForm, 'batchQuantity', value)} />
+              <TextField label="Batch final weight" type="number" value={form.finalWeight?.quantity} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'quantity', value)} />
+              <SelectField label="Final Unit" value={form.finalWeight?.unit} onChange={(value) => setNestedFormValue(setForm, 'finalWeight', 'unit', value)} options={[['g', 'g'], ['kg', 'kg']]} />
+            </div>
+          </InfoPanel>
+          <InfoPanel title="Ingredients">
+            <IngredientSearchBar value={ingredientSearch} onChange={setIngredientSearch} placeholder="Search raw materials to add" />
+            <div className="ingredient-list">
+              {ingredientRows.map(({ ingredient, index }) => (
+                <IngredientRow
+                  key={index}
+                  ingredient={ingredient}
+                  materials={materials}
+                  selectedMaterialIds={form.ingredients.map((item, itemIndex) => itemIndex === index ? null : item.rawMaterialId).filter(Boolean)}
+                  materialSearchQuery={ingredientSearch}
+                  onChange={(next) => updateIngredient(setForm, index, next)}
+                  onRemove={() => removeIngredient(setForm, index)}
+                  portionCost={draft?.ok ? draft.data.ingredients.find((item) => item.rawMaterialId === ingredient.rawMaterialId)?.portionCostUSD : null}
+                />
+              ))}
+            </div>
+          </InfoPanel>
+        </div>
+        <aside className="builder-summary">
+          <div className="summary-card">
+            <span>Batch Total</span>
+            <strong>${formatUsd(draft?.ok ? draft.data.totalCostUSD : 0)}</strong>
+          </div>
+          <div className="summary-card total-card">
+            <span>Per Unit Total</span>
+            <strong>${formatUsd(draft?.ok ? draft.data.perUnit.totalCostUSD : 0)}</strong>
+          </div>
+          {draft && !draft.ok && <Notice type="warning" message={draft.error.message} />}
+          <button className="primary-button full" disabled={saving}><Save size={18} />{saving ? 'Saving...' : 'Save Batch'}</button>
         </aside>
       </div>
     </form>
@@ -1632,7 +2082,7 @@ function IngredientRow({ ingredient, materials, selectedMaterialIds, materialSea
 
   return (
     <div className="ingredient-row">
-      <UpwardSelectField label="Raw Material" value={ingredient.rawMaterialId} onChange={(value) => onChange({ ...ingredient, rawMaterialId: value, unit: defaultUnit(materials.find((item) => item.id === value)) })} options={[['', materialSearchQuery.trim() ? 'Select matching material' : 'Select material'], ...visibleMaterialOptions.map((item) => [item.id, item.name])]} />
+      <UpwardSelectField label="Raw Material" value={ingredient.rawMaterialId} onChange={(value) => onChange({ ...ingredient, rawMaterialId: value, unit: defaultUnit(materials.find((item) => item.id === value)) })} options={[['', materialSearchQuery.trim() ? 'Select matching material' : 'Select material'], ...visibleMaterialOptions.map((item) => [item.id, `${item.name} (${item.sourceType === 'production' ? 'Production' : 'Supplier'})`])]} />
       <TextField label="Quantity" type="number" value={ingredient.quantity} onChange={(value) => onChange({ ...ingredient, quantity: value })} />
       <SelectField label="Unit" value={ingredient.unit} onChange={(value) => onChange({ ...ingredient, unit: value })} options={units} />
       <div className="portion-cost">
@@ -1673,6 +2123,9 @@ function SettingsView({ settings, refreshAll, setError, canEdit }) {
       </InfoPanel>
       <InfoPanel title="Data Folder">
         <p className="path-text">{settings?.dataFolder}</p>
+      </InfoPanel>
+      <InfoPanel title="Raw Material Naming">
+        <p className="muted">Supplier raw materials read as: Supplier, then Brand, then Material. Example: Supplier Brand Flour. Production raw materials can use a normal custom name.</p>
       </InfoPanel>
     </div>
   );
@@ -1853,6 +2306,16 @@ function setFormValue(setForm, key, value) {
   setForm((current) => ({ ...current, [key]: value }));
 }
 
+function setNestedFormValue(setForm, group, key, value) {
+  setForm((current) => ({
+    ...current,
+    [group]: {
+      ...(current[group] ?? {}),
+      [key]: value
+    }
+  }));
+}
+
 function updateConversion(setForm, unit, conversion) {
   setForm((current) => {
     const nextConversions = { ...(current.customConversions ?? {}) };
@@ -1924,6 +2387,27 @@ function removeIngredient(setForm, index) {
   }));
 }
 
+function addVision(setForm) {
+  setForm((current) => ({
+    ...current,
+    visions: [...(current.visions ?? []), { servingCount: '' }]
+  }));
+}
+
+function updateVision(setForm, index, next) {
+  setForm((current) => ({
+    ...current,
+    visions: (current.visions ?? []).map((vision, itemIndex) => itemIndex === index ? { ...vision, ...next } : vision)
+  }));
+}
+
+function removeVision(setForm, index) {
+  setForm((current) => ({
+    ...current,
+    visions: (current.visions ?? []).filter((_, itemIndex) => itemIndex !== index)
+  }));
+}
+
 function ensureTrailingEmptyRow(form) {
   const ingredients = [...form.ingredients];
   const last = ingredients[ingredients.length - 1];
@@ -1935,7 +2419,11 @@ function ensureTrailingEmptyRow(form) {
 
 function materialToForm(material) {
   return {
+    sourceType: material.sourceType ?? 'supplier',
     name: material.name,
+    supplier: material.supplier ?? '',
+    brand: material.brand ?? '',
+    materialName: material.materialName ?? material.name,
     baseUnit: material.baseUnit,
     purchaseQuantity: material.purchaseQuantity,
     purchaseUnit: material.purchaseUnit,
@@ -1943,6 +2431,12 @@ function materialToForm(material) {
     purchaseCurrency: 'USD',
     customConversions: material.customConversions ?? {},
     conversionMode: Object.keys(material.customConversions ?? {}).length > 0 ? 'manual' : 'none',
+    ingredients: ensureTrailingEmptyRow({ ingredients: (material.ingredients ?? []).map((ingredient) => ({
+      rawMaterialId: ingredient.rawMaterialId,
+      quantity: ingredient.quantity,
+      unit: ingredient.unit
+    })) }).ingredients,
+    finalWeight: material.finalWeight ?? { quantity: '', unit: 'g' },
     notes: material.notes ?? ''
   };
 }
@@ -1950,7 +2444,26 @@ function materialToForm(material) {
 function productToForm(product) {
   return ensureTrailingEmptyRow({
     name: product.name,
+    category: product.category ?? 'cake',
+    servingCount: product.servingCount ?? '',
+    finalWeight: product.finalWeight ?? { quantity: '', unit: 'g' },
+    visions: (product.visions ?? []).map((vision) => ({ servingCount: vision.servingCount })),
     ingredients: product.ingredients.map((ingredient) => ({
+      rawMaterialId: ingredient.rawMaterialId,
+      quantity: ingredient.quantity,
+      unit: ingredient.unit
+    }))
+  });
+}
+
+function batchToForm(batch) {
+  return ensureTrailingEmptyRow({
+    name: batch.name,
+    category: batch.category ?? 'cake',
+    servingCount: batch.servingCount ?? '',
+    batchQuantity: batch.batchQuantity ?? '',
+    finalWeight: batch.finalWeight ?? { quantity: '', unit: 'g' },
+    ingredients: (batch.ingredients ?? []).map((ingredient) => ({
       rawMaterialId: ingredient.rawMaterialId,
       quantity: ingredient.quantity,
       unit: ingredient.unit
@@ -1964,6 +2477,14 @@ function unitOptions() {
 
 function customUnitOptions() {
   return [['cup', 'cup'], ['tbsp', 'tbsp'], ['tsp', 'tsp']];
+}
+
+function productCategoryOptions() {
+  return [['piece', 'Piece'], ['cake', 'Cake'], ['box', 'Box']];
+}
+
+function productCategoryLabel(category) {
+  return productCategoryOptions().find(([value]) => value === category)?.[1] ?? 'Cake';
 }
 
 function availableUnits(material) {
@@ -1997,6 +2518,28 @@ function boughtUnitDisplayCost(material) {
   };
 }
 
+function formatWeightGrams(value) {
+  const grams = Number(value ?? 0);
+  if (!Number.isFinite(grams) || grams <= 0) return '0 g';
+  if (grams >= 1000) return `${formatUsd(grams / 1000)} kg`;
+  return `${roundForInput(grams)} g`;
+}
+
+function formatOptionalWeight(weight) {
+  if (!weight?.quantity) return 'N/A';
+  return `${roundForInput(weight.quantity)} ${weight.unit ?? 'g'}`;
+}
+
+function weightToGrams(weight) {
+  const quantity = Number(weight?.quantity);
+  if (!Number.isFinite(quantity) || quantity <= 0) return null;
+  return weight.unit === 'kg' ? quantity * 1000 : quantity;
+}
+
+function materialNameForId(materials, id) {
+  return materials.find((material) => material.id === id)?.name ?? id;
+}
+
 function filterByName(items, query) {
   const needle = query.trim().toLowerCase();
   if (!needle) return items;
@@ -2024,6 +2567,12 @@ function sortItems(items, mode) {
   if (mode === 'alphabetical') return [...items].sort((first, second) => first.name.localeCompare(second.name) || first.id.localeCompare(second.id));
   if (mode === 'newest') return [...items].sort((first, second) => dateValue(second.createdAt) - dateValue(first.createdAt));
   if (mode === 'oldest') return [...items].sort((first, second) => dateValue(first.createdAt) - dateValue(second.createdAt));
+  if (mode === 'cost-asc') return [...items].sort((first, second) => Number(first.totalCostUSD ?? first.purchasePriceUSD ?? first.ingredientCostUSD ?? 0) - Number(second.totalCostUSD ?? second.purchasePriceUSD ?? second.ingredientCostUSD ?? 0));
+  if (mode === 'cost-desc') return [...items].sort((first, second) => Number(second.totalCostUSD ?? second.purchasePriceUSD ?? second.ingredientCostUSD ?? 0) - Number(first.totalCostUSD ?? first.purchasePriceUSD ?? first.ingredientCostUSD ?? 0));
+  if (mode === 'weight-asc') return [...items].sort((first, second) => Number(first.ingredientWeightGrams ?? 0) - Number(second.ingredientWeightGrams ?? 0));
+  if (mode === 'weight-desc') return [...items].sort((first, second) => Number(second.ingredientWeightGrams ?? 0) - Number(first.ingredientWeightGrams ?? 0));
+  if (mode === 'final-weight-asc') return [...items].sort((first, second) => Number(weightToGrams(first.finalWeight) ?? 0) - Number(weightToGrams(second.finalWeight) ?? 0));
+  if (mode === 'final-weight-desc') return [...items].sort((first, second) => Number(weightToGrams(second.finalWeight) ?? 0) - Number(weightToGrams(first.finalWeight) ?? 0));
   return items;
 }
 
@@ -2149,13 +2698,21 @@ function canEditSection(permissions, section) {
 
 function sectionForView(viewName) {
   if (viewName?.startsWith('material')) return 'materials';
+  if (viewName?.startsWith('production-material')) return 'productionMaterials';
   if (viewName?.startsWith('product')) return 'products';
+  if (viewName?.startsWith('batch')) return 'batches';
   if (viewName === 'settings') return 'settings';
   return 'home';
 }
 
 function firstVisibleSection(permissions) {
   return sectionConfig.find((section) => canViewSection(permissions, section.id))?.id ?? null;
+}
+
+function defaultViewForSection(section) {
+  if (section === 'productionMaterials') return 'production-materials';
+  if (section === 'batches') return 'batches';
+  return section;
 }
 
 function sectionLabel(sectionId) {

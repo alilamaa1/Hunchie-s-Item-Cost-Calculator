@@ -18,6 +18,14 @@ export function validateSavedRawMaterial(input) {
     return failureFromCode(ErrorCodes.RAW_MATERIAL_NAME_REQUIRED);
   }
 
+  const sourceType = input.sourceType === 'production' ? 'production' : 'supplier';
+  const hasStructuredName = Boolean(input.supplier || input.brand);
+  if (sourceType === 'supplier' && hasStructuredName) {
+    if (!isNonEmptyString(input.supplier)) return failureFromCode(ErrorCodes.RAW_MATERIAL_SUPPLIER_REQUIRED);
+    if (!isNonEmptyString(input.brand)) return failureFromCode(ErrorCodes.RAW_MATERIAL_BRAND_REQUIRED);
+    if (!isNonEmptyString(input.materialName)) return failureFromCode(ErrorCodes.RAW_MATERIAL_MATERIAL_REQUIRED);
+  }
+
   if (!SUPPORTED_BASE_UNITS.includes(input.baseUnit)) {
     return failureFromCode(ErrorCodes.BASE_UNIT_UNSUPPORTED);
   }
@@ -72,8 +80,11 @@ export function validateSavedRawMaterial(input) {
   return success({
     ...input,
     name: input.name.trim(),
+    sourceType,
+    supplier: typeof input.supplier === 'string' ? input.supplier.trim() : '',
+    brand: typeof input.brand === 'string' ? input.brand.trim() : '',
+    materialName: typeof input.materialName === 'string' ? input.materialName.trim() : input.name.trim(),
     notes: typeof input.notes === 'string' ? input.notes : '',
     customConversions
   });
 }
-

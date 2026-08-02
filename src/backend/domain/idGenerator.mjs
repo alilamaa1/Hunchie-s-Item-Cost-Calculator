@@ -6,6 +6,10 @@ export function generateNextProductId(products) {
   return generateNextId(products, 'PR');
 }
 
+export function generateNextBatchId(batches) {
+  return generateNextId(batches, 'BP');
+}
+
 export function preserveRawMaterialId(existingMaterial, updates) {
   return {
     ...updates,
@@ -35,4 +39,3 @@ function generateNextId(records, prefix) {
 
   return `${prefix}-${String(maxNumber + 1).padStart(4, '0')}`;
 }
-

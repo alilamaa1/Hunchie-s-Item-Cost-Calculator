@@ -23,6 +23,7 @@ export async function initializeAppDataFolder(options = {}) {
 
     await ensureJsonFile(fileSystem, join(dataFolder, 'raw_materials.json'), []);
     await ensureJsonFile(fileSystem, join(dataFolder, 'products.json'), []);
+    await ensureJsonFile(fileSystem, join(dataFolder, 'batches.json'), []);
     await ensureJsonFile(fileSystem, join(dataFolder, 'users.json'), []);
     await ensureJsonFile(
       fileSystem,

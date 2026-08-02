@@ -26,6 +26,7 @@ export const CustomUnits = Object.freeze({
 export const REQUIRED_DATA_FILES = Object.freeze([
   'raw_materials.json',
   'products.json',
+  'batches.json',
   'settings.json',
   'users.json'
 ]);

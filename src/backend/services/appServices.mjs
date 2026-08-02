@@ -1,6 +1,7 @@
 import { initializeApp } from './appInitializationService.mjs';
 import {
   calculateRawMaterialDraft,
+  calculateProductionRawMaterialDraft,
   createRawMaterial,
   deleteRawMaterial,
   getRawMaterialById,
@@ -18,6 +19,14 @@ import {
   searchProducts,
   updateProduct
 } from './productService.mjs';
+import {
+  calculateBatchDraft,
+  createBatch,
+  deleteBatch,
+  getBatchById,
+  listBatches,
+  updateBatch
+} from './batchService.mjs';
 import { loadSettings, updateSettings } from './settingsService.mjs';
 import {
   authenticateUser,
@@ -45,6 +54,12 @@ export function createAppServices() {
     listProducts,
     getProductById,
     searchProducts,
+    calculateBatchDraft,
+    createBatch,
+    updateBatch,
+    deleteBatch,
+    listBatches,
+    getBatchById,
     loadProducts,
     loadSettings,
     updateSettings,
@@ -55,6 +70,25 @@ export function createAppServices() {
     updateUser,
     changePassword,
     authenticateUser,
+    calculateRawMaterialDraft: async (input, context) => {
+      if (input?.sourceType !== 'production') {
+        const settings = await loadSettings(context);
+        if (!settings.ok) return settings;
+        return calculateRawMaterialDraft(input, {
+          ...context,
+          exchangeRate: settings.data.currency.usdToLbp
+        });
+      }
+      const [materials, settings] = await Promise.all([
+        listRawMaterials(context),
+        loadSettings(context)
+      ]);
+      if (!materials.ok) return materials;
+      if (!settings.ok) return settings;
+      return calculateProductionRawMaterialDraft(input, materials.data, {
+        exchangeRate: settings.data.currency.usdToLbp
+      });
+    },
     calculateProductDraft: async (input, context) => {
       const [materials, settings] = await Promise.all([
         listRawMaterials(context),

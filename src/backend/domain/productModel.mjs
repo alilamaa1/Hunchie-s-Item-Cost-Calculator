@@ -13,6 +13,7 @@ const SUPPORTED_INGREDIENT_UNITS = Object.freeze([
   ...SUPPORTED_BASE_UNITS,
   ...SUPPORTED_CUSTOM_UNITS
 ]);
+const PRODUCT_CATEGORIES = Object.freeze(['piece', 'cake', 'box']);
 
 export function validateSavedProduct(input) {
   if (!isPlainObject(input) || !isNonEmptyString(input.id)) {
@@ -21,6 +22,11 @@ export function validateSavedProduct(input) {
 
   if (!isNonEmptyString(input.name)) {
     return failureFromCode(ErrorCodes.PRODUCT_NAME_REQUIRED);
+  }
+
+  const category = input.category ?? 'cake';
+  if (!PRODUCT_CATEGORIES.includes(category)) {
+    return failureFromCode(ErrorCodes.PRODUCT_CATEGORY_REQUIRED);
   }
 
   if (!Array.isArray(input.ingredients)) {
@@ -42,13 +48,20 @@ export function validateSavedProduct(input) {
     return failureFromCode(ErrorCodes.PRODUCT_INGREDIENTS_REQUIRED);
   }
 
+  const ingredientWeightGrams = isFiniteNumber(input.ingredientWeightGrams) ? input.ingredientWeightGrams : 0;
+
   if (!isIsoTimestamp(input.createdAt) || !isIsoTimestamp(input.updatedAt)) {
     return failureFromCode(ErrorCodes.TIMESTAMP_INVALID);
   }
 
   return success({
     ...input,
-    name: input.name.trim()
+    name: input.name.trim(),
+    category,
+    servingCount: input.servingCount ?? null,
+    finalWeight: input.finalWeight ?? null,
+    ingredientWeightGrams,
+    visions: Array.isArray(input.visions) ? input.visions : []
   });
 }
 

@@ -8,6 +8,7 @@ import { isPositiveNumber } from '../domain/validators.mjs';
 import { convertQuantity, isSupportedUnit } from '../domain/unitConversionEngine.mjs';
 import { getAppFilePaths } from '../storage/appFiles.mjs';
 import { backupJsonFile, readJsonFile, writeJsonFile } from '../storage/jsonStorage.mjs';
+import { loadSettings } from './settingsService.mjs';
 
 const defaultStorage = Object.freeze({
   backupJsonFile,
@@ -17,10 +18,24 @@ const defaultStorage = Object.freeze({
 
 export function validateRawMaterialInput(input, options = {}) {
   const exchangeRate = options.exchangeRate ?? DEFAULT_USD_TO_LBP;
-  const name = typeof input?.name === 'string' ? input.name.trim() : '';
+  const sourceType = input?.sourceType === 'production' ? 'production' : 'supplier';
+  const supplier = typeof input?.supplier === 'string' ? input.supplier.trim() : '';
+  const brand = typeof input?.brand === 'string' ? input.brand.trim() : '';
+  const materialName = typeof input?.materialName === 'string' ? input.materialName.trim() : '';
+  const legacyName = typeof input?.name === 'string' ? input.name.trim() : '';
+  const usesStructuredSupplierName = Boolean(supplier || brand || materialName || !legacyName);
+  const name = sourceType === 'supplier'
+    ? usesStructuredSupplierName ? [supplier, brand, materialName].filter(Boolean).join(' ').trim() : legacyName
+    : legacyName;
 
   if (!name) {
     return failureFromCode(ErrorCodes.RAW_MATERIAL_NAME_REQUIRED);
+  }
+
+  if (sourceType === 'supplier' && usesStructuredSupplierName) {
+    if (!supplier) return failureFromCode(ErrorCodes.RAW_MATERIAL_SUPPLIER_REQUIRED);
+    if (!brand) return failureFromCode(ErrorCodes.RAW_MATERIAL_BRAND_REQUIRED);
+    if (!materialName) return failureFromCode(ErrorCodes.RAW_MATERIAL_MATERIAL_REQUIRED);
   }
 
   if (!SUPPORTED_BASE_UNITS.includes(input.baseUnit)) {
@@ -72,6 +87,10 @@ export function validateRawMaterialInput(input, options = {}) {
 
   return success({
     name,
+    sourceType,
+    supplier: sourceType === 'supplier' ? supplier : '',
+    brand: sourceType === 'supplier' ? brand : '',
+    materialName: sourceType === 'supplier' ? (materialName || legacyName) : name,
     baseUnit: input.baseUnit,
     purchaseQuantity,
     purchaseUnit: input.purchaseUnit,
@@ -89,14 +108,63 @@ export function calculateRawMaterialDraft(input, options = {}) {
   return validateRawMaterialInput(input, options);
 }
 
+export function calculateProductionRawMaterialDraft(input, rawMaterials, options = {}) {
+  const exchangeRate = options.exchangeRate ?? DEFAULT_USD_TO_LBP;
+  const name = typeof input?.name === 'string' ? input.name.trim() : '';
+  if (!name) return failureFromCode(ErrorCodes.RAW_MATERIAL_NAME_REQUIRED);
+  if (!['kg', 'g'].includes(input?.baseUnit)) return failureFromCode(ErrorCodes.BASE_UNIT_UNSUPPORTED);
+
+  const finalWeight = normalizeWeight(input?.finalWeight);
+  if (!finalWeight) return failureFromCode(ErrorCodes.PURCHASE_QUANTITY_INVALID);
+
+  const ingredients = calculateRecipeIngredients(input?.ingredients, rawMaterials, exchangeRate, input?.id);
+  if (!ingredients.ok) return ingredients;
+
+  const convertedFinalWeight = convertQuantity(finalWeight.quantity, finalWeight.unit, input.baseUnit, {});
+  if (!convertedFinalWeight.ok) return convertedFinalWeight;
+
+  const purchasePriceUSD = roundCalculation(ingredients.data.ingredientCostUSD);
+  const purchasePriceLBP = roundCalculation(ingredients.data.ingredientCostLBP);
+  const costPerBaseUnitUSD = roundCalculation(purchasePriceUSD / convertedFinalWeight.data.quantity);
+  const costPerBaseUnitLBP = roundCalculation(purchasePriceLBP / convertedFinalWeight.data.quantity);
+
+  return success({
+    name,
+    sourceType: 'production',
+    supplier: '',
+    brand: '',
+    materialName: name,
+    baseUnit: input.baseUnit,
+    purchaseQuantity: finalWeight.quantity,
+    purchaseUnit: finalWeight.unit,
+    purchaseCurrency: 'USD',
+    purchasePriceUSD,
+    purchasePriceLBP,
+    costPerBaseUnitUSD,
+    costPerBaseUnitLBP,
+    customConversions: {},
+    ingredients: ingredients.data.ingredients,
+    ingredientWeightGrams: ingredients.data.ingredientWeightGrams,
+    finalWeight,
+    notes: typeof input.notes === 'string' ? input.notes : ''
+  });
+}
+
 export async function createRawMaterial(input, options) {
   const context = requireDataFolder(options);
   if (!context.ok) return context;
 
-  const materialsResult = await loadRawMaterials(context.data);
+  const [materialsResult, settingsResult] = await Promise.all([
+    loadRawMaterials(context.data),
+    loadSettings(context.data)
+  ]);
   if (!materialsResult.ok) return materialsResult;
+  if (!settingsResult.ok) return settingsResult;
 
-  const normalized = validateRawMaterialInput(input, context.data);
+  const calculationOptions = { ...context.data, exchangeRate: settingsResult.data.currency.usdToLbp };
+  const normalized = input?.sourceType === 'production'
+    ? calculateProductionRawMaterialDraft(input, materialsResult.data, calculationOptions)
+    : validateRawMaterialInput(input, calculationOptions);
   if (!normalized.ok) return normalized;
 
   const duplicate = findDuplicateName(materialsResult.data, normalized.data.name);
@@ -125,15 +193,22 @@ export async function updateRawMaterial(id, input, options) {
   const context = requireDataFolder(options);
   if (!context.ok) return context;
 
-  const materialsResult = await loadRawMaterials(context.data);
+  const [materialsResult, settingsResult] = await Promise.all([
+    loadRawMaterials(context.data),
+    loadSettings(context.data)
+  ]);
   if (!materialsResult.ok) return materialsResult;
+  if (!settingsResult.ok) return settingsResult;
 
   const existing = materialsResult.data.find((material) => material.id === id);
   if (!existing) {
     return failureFromCode(ErrorCodes.RAW_MATERIAL_NOT_FOUND);
   }
 
-  const normalized = validateRawMaterialInput(input, context.data);
+  const calculationOptions = { ...context.data, exchangeRate: settingsResult.data.currency.usdToLbp };
+  const normalized = input?.sourceType === 'production'
+    ? calculateProductionRawMaterialDraft({ ...input, id }, materialsResult.data, calculationOptions)
+    : validateRawMaterialInput(input, calculationOptions);
   if (!normalized.ok) return normalized;
 
   const duplicate = findDuplicateName(materialsResult.data, normalized.data.name, id);
@@ -165,10 +240,14 @@ export async function listRawMaterials(options) {
   const context = requireDataFolder(options);
   if (!context.ok) return context;
 
-  const materials = await loadRawMaterials(context.data);
+  const [materials, settings] = await Promise.all([
+    loadRawMaterials(context.data),
+    loadSettings(context.data)
+  ]);
   if (!materials.ok) return materials;
+  if (!settings.ok) return settings;
 
-  return success(sortRawMaterials(materials.data));
+  return success(sortRawMaterials(recalculateProductionMaterials(materials.data, settings.data.currency.usdToLbp)));
 }
 
 export async function getRawMaterialById(id, options) {
@@ -201,9 +280,14 @@ export async function deleteRawMaterial(id, options) {
 
   const productsResult = await context.data.storage.readJsonFile(getAppFilePaths(context.data.dataFolder).products);
   if (productsResult.ok) {
+    const batchesResult = await context.data.storage.readJsonFile(getAppFilePaths(context.data.dataFolder).batches);
     const inUse = productsResult.data.some((product) =>
       product.ingredients?.some((ingredient) => ingredient.rawMaterialId === id)
-    );
+    ) || materialsResult.data.some((material) =>
+      material.id !== id && material.ingredients?.some((ingredient) => ingredient.rawMaterialId === id)
+    ) || (batchesResult.ok && batchesResult.data.some((batch) =>
+      batch.ingredients?.some((ingredient) => ingredient.rawMaterialId === id)
+    ));
 
     if (inUse && context.data.deletePolicy !== 'allow-missing-references') {
       return failureFromCode(ErrorCodes.RAW_MATERIAL_IN_USE);
@@ -267,6 +351,89 @@ function normalizeName(value) {
 
 function sortRawMaterials(materials) {
   return [...materials].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
+function recalculateProductionMaterials(materials, exchangeRate) {
+  let current = materials;
+  for (let pass = 0; pass < 3; pass += 1) {
+    current = current.map((material) => {
+      if (material.sourceType !== 'production') return material;
+      const recalculated = calculateProductionRawMaterialDraft(material, current.filter((item) => item.id !== material.id), { exchangeRate });
+      return recalculated.ok ? {
+        ...material,
+        ...recalculated.data,
+        id: material.id,
+        createdAt: material.createdAt,
+        updatedAt: material.updatedAt
+      } : material;
+    });
+  }
+  return current;
+}
+
+function calculateRecipeIngredients(inputIngredients, rawMaterials, exchangeRate, selfId = undefined) {
+  const ingredients = Array.isArray(inputIngredients) ? inputIngredients.filter((ingredient) =>
+    ingredient?.rawMaterialId || ingredient?.quantity || ingredient?.unit
+  ) : [];
+
+  if (ingredients.length === 0) return failureFromCode(ErrorCodes.PRODUCT_INGREDIENTS_REQUIRED);
+
+  const seen = new Set();
+  const calculatedIngredients = [];
+
+  for (let index = 0; index < ingredients.length; index += 1) {
+    const ingredient = ingredients[index];
+    const quantity = toNumber(ingredient.quantity);
+
+    if (!ingredient.rawMaterialId) return failureFromCode(ErrorCodes.INGREDIENT_MATERIAL_REQUIRED, { row: index });
+    if (ingredient.rawMaterialId === selfId) return failureFromCode(ErrorCodes.INGREDIENT_DUPLICATE_RAW_MATERIAL, { row: index });
+    if (seen.has(ingredient.rawMaterialId)) return failureFromCode(ErrorCodes.INGREDIENT_DUPLICATE_RAW_MATERIAL, { row: index });
+    if (!isPositiveNumber(quantity)) return failureFromCode(ErrorCodes.INGREDIENT_QUANTITY_INVALID, { row: index });
+    if (!ingredient.unit) return failureFromCode(ErrorCodes.INGREDIENT_UNIT_REQUIRED, { row: index });
+
+    seen.add(ingredient.rawMaterialId);
+    const material = rawMaterials.find((item) => item.id === ingredient.rawMaterialId);
+    if (!material) return failureFromCode(ErrorCodes.MISSING_RAW_MATERIAL, { row: index });
+
+    const converted = convertQuantity(quantity, ingredient.unit, material.baseUnit, material);
+    if (!converted.ok) return failureFromCode(converted.error.code, { row: index });
+
+    const portionCostUSD = roundCalculation(converted.data.quantity * material.costPerBaseUnitUSD);
+    calculatedIngredients.push({
+      rawMaterialId: material.id,
+      quantity,
+      unit: ingredient.unit,
+      convertedQuantity: converted.data.quantity,
+      convertedUnit: converted.data.unit,
+      portionCostUSD,
+      portionCostLBP: roundCalculation(portionCostUSD * exchangeRate)
+    });
+  }
+
+  return success({
+    ingredients: calculatedIngredients,
+    ingredientWeightGrams: calculateIngredientWeightGrams(calculatedIngredients),
+    ingredientCostUSD: roundCalculation(calculatedIngredients.reduce((sum, ingredient) => sum + ingredient.portionCostUSD, 0)),
+    ingredientCostLBP: roundCalculation(calculatedIngredients.reduce((sum, ingredient) => sum + ingredient.portionCostLBP, 0))
+  });
+}
+
+function normalizeWeight(weight) {
+  const quantity = toNumber(weight?.quantity);
+  const unit = ['kg', 'g'].includes(weight?.unit) ? weight.unit : 'g';
+  return isPositiveNumber(quantity) ? { quantity, unit } : null;
+}
+
+function calculateIngredientWeightGrams(ingredients) {
+  return roundCalculation(ingredients.reduce((sum, ingredient) => {
+    if (ingredient.convertedUnit === 'kg') return sum + Number(ingredient.convertedQuantity ?? 0) * 1000;
+    if (ingredient.convertedUnit === 'g') return sum + Number(ingredient.convertedQuantity ?? 0);
+    return sum;
+  }, 0));
+}
+
+function roundCalculation(value) {
+  return Number(Number(value).toFixed(12));
 }
 
 function normalizeCustomConversions(customConversions = {}) {

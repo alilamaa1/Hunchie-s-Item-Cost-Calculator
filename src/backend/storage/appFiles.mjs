@@ -4,6 +4,7 @@ export function getAppFilePaths(dataFolder) {
   return {
     rawMaterials: join(dataFolder, 'raw_materials.json'),
     products: join(dataFolder, 'products.json'),
+    batches: join(dataFolder, 'batches.json'),
     settings: join(dataFolder, 'settings.json'),
     users: join(dataFolder, 'users.json'),
     backups: join(dataFolder, 'backups')

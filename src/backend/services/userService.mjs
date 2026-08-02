@@ -14,7 +14,9 @@ const defaultStorage = Object.freeze({
 const sectionPermissions = Object.freeze({
   home: { visible: true, edit: false },
   materials: { visible: true, edit: true },
+  productionMaterials: { visible: true, edit: true },
   products: { visible: true, edit: true },
+  batches: { visible: true, edit: true },
   settings: { visible: true, edit: true }
 });
 

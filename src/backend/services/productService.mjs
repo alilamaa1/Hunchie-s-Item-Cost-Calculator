@@ -8,7 +8,7 @@ import { convertQuantity, getCompatibleUnits } from '../domain/unitConversionEng
 import { isPositiveNumber } from '../domain/validators.mjs';
 import { getAppFilePaths } from '../storage/appFiles.mjs';
 import { backupJsonFile, readJsonFile, writeJsonFile } from '../storage/jsonStorage.mjs';
-import { loadRawMaterials } from './rawMaterialService.mjs';
+import { listRawMaterials } from './rawMaterialService.mjs';
 import { loadSettings } from './settingsService.mjs';
 
 const defaultStorage = Object.freeze({
@@ -27,6 +27,10 @@ export function cleanupProductInput(input) {
   return {
     ...input,
     name: typeof input?.name === 'string' ? input.name.trim() : '',
+    category: normalizeProductCategory(input?.category),
+    servingCount: normalizeOptionalPositiveNumber(input?.servingCount),
+    finalWeight: normalizeOptionalWeight(input?.finalWeight),
+    visions: normalizeVisions(input?.visions),
     ingredients: ingredients.map((ingredient) => ({
       ...ingredient,
       quantity: normalizeQuantityValue(ingredient?.quantity)
@@ -70,6 +74,10 @@ export function calculateProductDraft(input, rawMaterials, options = {}) {
 
   if (!cleaned.name) {
     return failureFromCode(ErrorCodes.PRODUCT_NAME_REQUIRED);
+  }
+
+  if (!cleaned.category) {
+    return failureFromCode(ErrorCodes.PRODUCT_CATEGORY_REQUIRED);
   }
 
   if (cleaned.ingredients.length === 0) {
@@ -120,14 +128,27 @@ export function calculateProductDraft(input, rawMaterials, options = {}) {
   const ingredientCostLBP = roundCalculation(calculatedIngredients.reduce((sum, ingredient) => sum + ingredient.portionCostLBP, 0));
   const totalCostUSD = roundCalculation(ingredientCostUSD * totalCostMultiplier);
   const totalCostLBP = roundCalculation(ingredientCostLBP * totalCostMultiplier);
+  const ingredientWeightGrams = calculateIngredientWeightGrams(calculatedIngredients);
 
   return success({
     name: cleaned.name,
+    category: cleaned.category,
+    servingCount: cleaned.servingCount,
+    finalWeight: cleaned.finalWeight,
     ingredients: calculatedIngredients,
+    ingredientWeightGrams,
     ingredientCostUSD,
     ingredientCostLBP,
     totalCostUSD,
-    totalCostLBP
+    totalCostLBP,
+    visions: calculateVisions(cleaned.visions, {
+      ingredients: calculatedIngredients,
+      servingCount: cleaned.servingCount,
+      ingredientWeightGrams,
+      ingredientCostUSD,
+      ingredientCostLBP,
+      totalCostMultiplier
+    })
   });
 }
 
@@ -137,7 +158,7 @@ export async function createProduct(input, options) {
 
   const [productsResult, materialsResult, settingsResult] = await Promise.all([
     loadProducts(context.data),
-    loadRawMaterials(context.data),
+    listRawMaterials(context.data),
     loadSettings(context.data)
   ]);
   if (!productsResult.ok) return productsResult;
@@ -170,7 +191,7 @@ export async function updateProduct(id, input, options) {
 
   const [productsResult, materialsResult, settingsResult] = await Promise.all([
     loadProducts(context.data),
-    loadRawMaterials(context.data),
+    listRawMaterials(context.data),
     loadSettings(context.data)
   ]);
   if (!productsResult.ok) return productsResult;
@@ -209,13 +230,17 @@ export async function listProducts(options) {
   const context = requireDataFolder(options);
   if (!context.ok) return context;
 
-  const products = await loadProducts(context.data);
+  const [products, materials, settings] = await Promise.all([
+    loadProducts(context.data),
+    listRawMaterials(context.data),
+    loadSettings(context.data)
+  ]);
   if (!products.ok) return products;
-  const settings = await loadSettings(context.data);
+  if (!materials.ok) return materials;
   if (!settings.ok) return settings;
 
   return success(sortProducts(products.data).map((product) => ({
-    ...applyProductFormula(product, settings.data.formulas.totalCostMultiplier),
+    ...productForRead(product, materials.data, settings.data),
     ingredientCount: product.ingredients.length
   })));
 }
@@ -226,7 +251,7 @@ export async function getProductById(id, options) {
 
   const [productsResult, materialsResult, settingsResult] = await Promise.all([
     loadProducts(context.data),
-    loadRawMaterials(context.data),
+    listRawMaterials(context.data),
     loadSettings(context.data)
   ]);
   if (!productsResult.ok) return productsResult;
@@ -238,7 +263,7 @@ export async function getProductById(id, options) {
     return failureFromCode(ErrorCodes.PRODUCT_NOT_FOUND);
   }
 
-  return success(resolveProductDetail(applyProductFormula(product, settingsResult.data.formulas.totalCostMultiplier), materialsResult.data));
+  return success(resolveProductDetail(productForRead(product, materialsResult.data, settingsResult.data), materialsResult.data));
 }
 
 export async function searchProducts(query, options) {
@@ -377,12 +402,47 @@ function sortProducts(products) {
   return [...products].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
+function productForRead(product, rawMaterials, settings) {
+  const recalculated = calculateProductDraft(savedProductToDraftInput(product), rawMaterials, calculationOptionsFromSettings(settings));
+  if (recalculated.ok) {
+    return {
+      ...product,
+      ...recalculated.data
+    };
+  }
+
+  return applyProductFormula({
+    ...product,
+    category: normalizeProductCategory(product.category),
+    servingCount: normalizeOptionalPositiveNumber(product.servingCount),
+    finalWeight: normalizeOptionalWeight(product.finalWeight),
+    ingredientWeightGrams: Number(product.ingredientWeightGrams ?? 0),
+    visions: Array.isArray(product.visions) ? product.visions : []
+  }, settings.formulas.totalCostMultiplier);
+}
+
+function savedProductToDraftInput(product) {
+  return {
+    name: product.name,
+    category: product.category,
+    servingCount: product.servingCount,
+    finalWeight: product.finalWeight,
+    visions: product.visions,
+    ingredients: (product.ingredients ?? []).map((ingredient) => ({
+      rawMaterialId: ingredient.rawMaterialId,
+      quantity: ingredient.quantity,
+      unit: ingredient.unit
+    }))
+  };
+}
+
 function applyProductFormula(product, totalCostMultiplier = DEFAULT_TOTAL_COST_MULTIPLIER) {
-  const ingredientCostUSD = roundCalculation(product.ingredients.reduce((sum, ingredient) => sum + Number(ingredient.portionCostUSD ?? 0), 0));
-  const ingredientCostLBP = roundCalculation(product.ingredients.reduce((sum, ingredient) => sum + Number(ingredient.portionCostLBP ?? 0), 0));
+  const ingredientCostUSD = roundCalculation((product.ingredients ?? []).reduce((sum, ingredient) => sum + Number(ingredient.portionCostUSD ?? 0), 0));
+  const ingredientCostLBP = roundCalculation((product.ingredients ?? []).reduce((sum, ingredient) => sum + Number(ingredient.portionCostLBP ?? 0), 0));
 
   return {
     ...product,
+    ingredientWeightGrams: product.ingredientWeightGrams ?? calculateIngredientWeightGrams(product.ingredients ?? []),
     ingredientCostUSD,
     ingredientCostLBP,
     totalCostUSD: roundCalculation(ingredientCostUSD * resolveTotalCostMultiplier({ totalCostMultiplier })),
@@ -400,6 +460,63 @@ function calculationOptionsFromSettings(settings) {
 function resolveTotalCostMultiplier(options = {}) {
   const value = Number(options.totalCostMultiplier ?? options.formulas?.totalCostMultiplier ?? DEFAULT_TOTAL_COST_MULTIPLIER);
   return Number.isFinite(value) && value > 0 ? value : DEFAULT_TOTAL_COST_MULTIPLIER;
+}
+
+function normalizeProductCategory(value) {
+  return ['piece', 'cake', 'box'].includes(value) ? value : 'cake';
+}
+
+function normalizeOptionalPositiveNumber(value) {
+  if (value === '' || value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function normalizeOptionalWeight(weight) {
+  const quantity = normalizeOptionalPositiveNumber(weight?.quantity);
+  const unit = ['kg', 'g'].includes(weight?.unit) ? weight.unit : 'g';
+  return quantity ? { quantity, unit } : null;
+}
+
+function normalizeVisions(visions) {
+  if (!Array.isArray(visions)) return [];
+  return visions
+    .map((vision) => ({ servingCount: normalizeOptionalPositiveNumber(vision?.servingCount) }))
+    .filter((vision) => vision.servingCount);
+}
+
+function calculateIngredientWeightGrams(ingredients) {
+  return roundCalculation(ingredients.reduce((sum, ingredient) => {
+    if (ingredient.convertedUnit === 'kg') return sum + Number(ingredient.convertedQuantity ?? 0) * 1000;
+    if (ingredient.convertedUnit === 'g') return sum + Number(ingredient.convertedQuantity ?? 0);
+    return sum;
+  }, 0));
+}
+
+function calculateVisions(visions, product) {
+  if (!Array.isArray(visions) || visions.length === 0 || !product.servingCount) return [];
+
+  return visions.map((vision) => {
+    const scale = vision.servingCount / product.servingCount;
+    const ingredientCostUSD = roundCalculation(product.ingredientCostUSD * scale);
+    const ingredientCostLBP = roundCalculation(product.ingredientCostLBP * scale);
+    return {
+      servingCount: vision.servingCount,
+      scale: roundCalculation(scale),
+      ingredientWeightGrams: roundCalculation(product.ingredientWeightGrams * scale),
+      ingredientCostUSD,
+      ingredientCostLBP,
+      totalCostUSD: roundCalculation(ingredientCostUSD * product.totalCostMultiplier),
+      totalCostLBP: roundCalculation(ingredientCostLBP * product.totalCostMultiplier),
+      ingredients: product.ingredients.map((ingredient) => ({
+        ...ingredient,
+        quantity: roundCalculation(Number(ingredient.quantity) * scale),
+        convertedQuantity: roundCalculation(Number(ingredient.convertedQuantity) * scale),
+        portionCostUSD: roundCalculation(Number(ingredient.portionCostUSD) * scale),
+        portionCostLBP: roundCalculation(Number(ingredient.portionCostLBP) * scale)
+      }))
+    };
+  });
 }
 
 function getNow(context) {

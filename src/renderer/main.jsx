@@ -419,7 +419,7 @@ function LoginView({ onLogin }) {
     setLoading(false);
     if (!result.ok) {
       setForm({ username: '', password: '' });
-      setError('Wrong username or password.');
+      setError(result.error?.code === 'LOGIN_INVALID' ? 'Wrong username or password.' : result.error?.message ?? 'Could not sign in.');
       return;
     }
     onLogin(result.data);

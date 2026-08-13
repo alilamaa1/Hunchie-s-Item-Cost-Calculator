@@ -1126,7 +1126,7 @@ function Sidebar({ activeView, canView, canEdit, collapsed, onToggleCollapsed, o
         <nav className="nav-list">
           {nav.map((item) => {
             const Icon = item.icon;
-            const active = activeView === item.view || (activeView.startsWith(item.view.slice(0, -1)) && item.view !== 'home');
+            const active = sidebarItemIsActive(activeView, item.view);
             return (
               <button key={item.view} className={`nav-item ${active ? 'active' : ''}`} onClick={() => onNavigate(item.view)}>
                 <Icon size={20} />
@@ -1144,6 +1144,15 @@ function Sidebar({ activeView, canView, canEdit, collapsed, onToggleCollapsed, o
       </aside>
     </>
   );
+}
+
+function sidebarItemIsActive(activeView, navView) {
+  if (activeView === navView) return true;
+  if (navView === 'materials') return ['material-new', 'material-detail', 'material-edit'].includes(activeView);
+  if (navView === 'production-materials') return ['production-material-new', 'production-material-detail', 'production-material-edit'].includes(activeView);
+  if (navView === 'products') return ['product-new', 'product-detail', 'product-edit'].includes(activeView);
+  if (navView === 'batches') return ['batch-new', 'batch-detail', 'batch-edit'].includes(activeView);
+  return false;
 }
 
 function Header({ title, searchQuery, onSearchChange, searchScope, onSearchScopeChange, showSearchScope, onRefresh, refreshing, onMenu, onSettings, settings, currentUser, canView, onChangePassword, onLogout }) {

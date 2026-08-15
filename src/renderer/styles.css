@@ -878,6 +878,7 @@ button {
 
 .custom-select-button {
   width: 100%;
+  min-width: 0;
   min-height: 42px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -890,11 +891,21 @@ button {
   gap: 8px;
   text-align: left;
   font-weight: 750;
+  overflow: hidden;
 }
 
-.custom-select-button > span {
+.select-label-viewport {
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
+  container-type: inline-size;
+  display: block;
+  flex: 1 1 auto;
+}
+
+.select-label-text {
+  display: inline-block;
+  min-width: 0;
   color: var(--ink);
   font-size: 14px;
   font-weight: 750;
@@ -902,6 +913,34 @@ button {
   text-overflow: ellipsis;
   text-transform: none;
   white-space: nowrap;
+}
+
+.select-label-viewport.is-marquee .select-label-text {
+  animation: selectLabelMarquee 7.5s ease-in-out infinite;
+  min-width: max-content;
+  will-change: transform;
+}
+
+@keyframes selectLabelMarquee {
+  0%,
+  18% {
+    transform: translateX(0);
+  }
+
+  68%,
+  82% {
+    transform: translateX(calc(100cqw - 100%));
+  }
+
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .select-label-viewport.is-marquee .select-label-text {
+    animation: none;
+  }
 }
 
 .custom-select-button svg {
@@ -1133,12 +1172,17 @@ button {
 
 .ingredient-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1.4fr) 110px 110px 100px 44px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(96px, 110px) minmax(96px, 110px) minmax(86px, 100px) 44px;
   gap: 10px;
   align-items: end;
   padding: 12px;
   border-radius: 8px;
   background: var(--surface-soft);
+}
+
+.ingredient-row > .field,
+.ingredient-row > .portion-cost {
+  min-width: 0;
 }
 
 .portion-cost {

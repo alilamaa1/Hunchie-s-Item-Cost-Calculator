@@ -2235,6 +2235,7 @@ function SelectField({ label, value, onChange, options }) {
 function UpwardSelectField({ label, value, onChange, options }) {
   const [open, setOpen] = useState(false);
   const selectedLabel = options.find(([optionValue]) => optionValue === (value ?? ''))?.[1] ?? options[0]?.[1] ?? 'Select';
+  const selectedLabelIsLong = selectedLabel.length > 28;
 
   function choose(nextValue) {
     onChange(nextValue);
@@ -2250,7 +2251,9 @@ function UpwardSelectField({ label, value, onChange, options }) {
         onClick={() => setOpen((current) => !current)}
         onBlur={() => window.setTimeout(() => setOpen(false), 120)}
       >
-        <span>{selectedLabel}</span>
+        <span className={`select-label-viewport ${selectedLabelIsLong ? 'is-marquee' : ''}`}>
+          <span className="select-label-text">{selectedLabel}</span>
+        </span>
         <ChevronRight size={16} />
       </button>
       {open && (
